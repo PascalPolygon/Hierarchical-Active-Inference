@@ -45,6 +45,8 @@ class Planner(nn.Module):
         self.device = device
 
         if strategy == "information":
+            #Information gain is computed as a reduction in entropy between the entropy of the average of ensemble predictions and the average entropy across ensemble members
+            # It's a measure of expected reduction in uncertainty about the state by observing it, prioming actions that are expected to yield the most information.
             self.measure = InformationGain(self.ensemble, scale=expl_scale)
         elif strategy == "variance":
             self.measure = Variance(self.ensemble, scale=expl_scale)
@@ -95,6 +97,9 @@ class Planner(nn.Module):
                 rewards = rewards.mean(dim=1).sum(dim=0)
                 returns += rewards
                 self.trial_rewards.append(rewards)
+            
+            #TODO: Define block to urn under self.use_high_level which is
+            # a return based on how well the low-level policy follows high-level goals
 
             action_mean, action_std_dev = self._fit_gaussian(actions, returns)
 
@@ -116,8 +121,18 @@ class Planner(nn.Module):
         for t in range(self.plan_horizon):
             delta_mean, delta_var = self.ensemble(states[t], actions[t])
             if self.use_mean:
+                """
+                Deterministic Update
+                Pros: Computationally efficient. Provides a single expected trajectory, simplifying analysis.
+                Cons: Ignores model uncertainty and stochasticity in the environment, May lead to overconfident predictions and suboptimal exploration.
+                """
                 states[t + 1] = states[t] + delta_mean
             else:
+                """
+                Stochastic Update
+                Pros: Incorporates model uncertainty by considering variance. Leads to a distribution over possible future states, enhancing exploration.
+                Cons: Computationally more intensive due to sampling., Introduces randomness, which might make optimization noisier.
+                """
                 states[t + 1] = states[t] + self.ensemble.sample(delta_mean, delta_var)
             delta_means[t + 1] = delta_mean
             delta_vars[t + 1] = delta_var

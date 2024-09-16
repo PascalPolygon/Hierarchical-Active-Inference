@@ -34,7 +34,7 @@ def get_config(args):
     config.set_strategy(args.strategy)
     return config
 
-
+#TODO: Experiment with various context_lengths for each environment
 class Config(object):
     def __init__(self):
         self.logdir = "log"
@@ -70,6 +70,10 @@ class Config(object):
 
         self.expl_scale = 1.0
         self.reward_scale = 1.0
+        self.action_noise_scale = 0.1
+
+        self.context_length = 7
+        self.n_experiments = 3
 
     def set_logdir(self, logdir):
         self.logdir = logdir
@@ -84,14 +88,28 @@ class Config(object):
         return pprint.pformat(vars(self))
 
 
+# class DebugConfig(Config):
+#     def __init__(self):
+#         super().__init__()
+#         self.env_name = "Pendulum-v0"
+#         self.n_episodes = 3
+#         self.n_train_epochs = 200
+#         self.max_episode_len = 10
+#         self.hidden_size = 64
+#         self.plan_horizon = 5
+#         self.context_length = 2
+
 class DebugConfig(Config):
     def __init__(self):
         super().__init__()
         self.env_name = "Pendulum-v0"
         self.n_episodes = 5
-        self.max_episode_len = 100
+        self.n_train_epochs = 1000
+        self.max_episode_len = 200
         self.hidden_size = 64
         self.plan_horizon = 5
+        self.context_length = 2
+        self.record_every = 0  # Record every episode for debugging
 
 
 class MountainCarConfig(Config):
@@ -99,14 +117,24 @@ class MountainCarConfig(Config):
         super().__init__()
         self.logdir = "mountain_car"
         self.env_name = "SparseMountainCar"
-        self.max_episode_len = 500
-        self.n_train_epochs = 100
+        # self.max_episode_len = 500
+        # self.n_train_epochs = 100
+        # self.n_seed_episodes = 1
+        # self.expl_scale = 1.0
+        # self.action_noise_scale = 0.1
+        # self.n_episodes = 30
+        # self.ensemble_size = 25
+        # self.record_every = None
+        # self.n_episodes = 50
+
+        self.max_episode_len = 5
+        self.n_train_epochs = 1
         self.n_seed_episodes = 1
         self.expl_scale = 1.0
-        self.n_episodes = 30
-        self.ensemble_size = 25
+        self.n_episodes = 3
+        self.ensemble_size = 5
         self.record_every = None
-        self.n_episodes = 50
+        self.n_episodes = 5
 
 
 class CupCatchConfig(Config):
@@ -118,6 +146,7 @@ class CupCatchConfig(Config):
         self.action_repeat = 4
         self.plan_horizon = 12
         self.expl_scale = 0.1
+        self.action_noise_scale = 0.2
         self.record_every = None
         self.n_episodes = 50
 
@@ -146,6 +175,7 @@ class HalfCheetahRunConfig(Config):
         self.use_exploration = True
         self.use_mean = True
         self.expl_scale = 0.1
+        self.action_noise_scale = 0.3
 
 
 class HalfCheetahFlipConfig(Config):
@@ -172,6 +202,7 @@ class HalfCheetahFlipConfig(Config):
         self.use_exploration = True
         self.use_mean = True
         self.expl_scale = 0.1
+        self.action_noise_scale = 0.4
 
 
 class AntMazeConfig(Config):
@@ -200,6 +231,7 @@ class AntMazeConfig(Config):
         self.use_reward = False
         self.use_mean = True
         self.expl_scale = 1.0
+        self.action_noise_scale = 0.5
 
 
 class ReacherConfig(Config):
@@ -227,3 +259,4 @@ class ReacherConfig(Config):
         self.use_reward = True
         self.use_mean = True
         self.expl_scale = 0.1
+        self.action_noise_scale = 0.1

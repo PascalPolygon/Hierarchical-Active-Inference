@@ -46,7 +46,7 @@ class Variance(object):
         return variance.sum(dim=0)
 
     def get_variance(self, delta_vars):
-        """ ensemble_size, candidates, n_dim """
+        """ensemble_size, candidates, n_dim"""
         variance = delta_vars.sum(dim=0).sum(dim=-1)
         return variance
 
@@ -74,7 +74,7 @@ class Disagreement(object):
         return disagreements.sum(dim=0)
 
     def get_disagreement(self, delta_means):
-        """ ensemble_size, candidates, n_dim """
+        """ensemble_size, candidates, n_dim"""
         disagreement = delta_means.std(dim=0).sum(dim=-1)
         return disagreement
 
@@ -101,16 +101,43 @@ class InformationGain(object):
         )
 
         for t in range(plan_horizon):
-            ent_avg = self.entropy_of_average(delta_states[t])
-            avg_ent = self.average_of_entropy(delta_vars[t])
-            info_gains[t, :] = ent_avg - avg_ent
+            """
+                Detailed explaination of Information Gain and why our environment entropy is modeled as an ensemble model.
+                https://chatgpt.com/share/66e8825f-7480-8001-b910-50fa17aa73da
+                
+                # TODO: For next paper, what'a a better world model to use then an ensemble model?
+                How to ensure that the model we use is as true as possible to true dynamics of the environment?
+                Is there a better way to represent the true dynamics of the environment?
+                
+                
+                In practice, especially in model-based reinforcement learning and active inference frameworks, 
+                the ensemble model serves as an approximation of the true dynamics of the environment. 
+                
+                Model Approximation:
+                The ensemble represents multiple hypotheses about the environment's dynamics. 
+                By aggregating these predictions, entropy_of_average captures the uncertainty modeled by the ensemble, serving as a stand-in for the true entropy H(Y).
+
+                Ensemble as Proxy for True Distribution:
+                In scenarios where the true distribution is unknown or intractable, an ensemble model provides a practical way to estimate 
+                H(Y). The diversity within the ensemble captures model uncertainty, which is crucial for effective exploration.
+
+                Y: Future state of the environment.
+                X: Ensemble model's predictions based on a candidate action sequence.
+                H(Y): Entropy of Y (uncertainty about without any knowledge of X).
+                H(Y∣X): Conditional entropy of Y given X (remaining uncertainty about Y after knowing X).
+                I(Y; X): Mutual information between Y and X (reduction in uncertainty about Y after knowing X).
+
+            """
+            ent_avg = self.entropy_of_average(delta_states[t])  # Estimates H(Y) - Entropy of the -- supposed true, approximated using model itself-- dynamics of the environment
+            avg_ent = self.average_of_entropy(delta_vars[t])  # Estimates H(Y | X)
+            info_gains[t, :] = ent_avg - avg_ent  # Computes I(Y; X)
 
         info_gains = info_gains * self.scale
         return info_gains.sum(dim=0)
 
     def entropy_of_average(self, samples):
         """
-        samples (ensemble_size, n_candidates, n_dim) 
+        samples (ensemble_size, n_candidates, n_dim)
         """
         samples = samples.permute(1, 0, 2)
         n_samples = samples.size(1)
