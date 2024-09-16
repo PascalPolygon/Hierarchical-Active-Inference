@@ -1,15 +1,17 @@
+# pylint: disable=not-callable
+# pylint: disable=no-member
+
 import torch
 import torch.nn as nn
 
 from pmbrl.control.measures import InformationGain, Disagreement, Variance, Random
-# from pmbrl.models import GoalModel  # Import the GoalModel
+
 
 class Planner(nn.Module):
     def __init__(
         self,
         ensemble,
         reward_model,
-        goal_model,  # Added goal_model
         action_size,
         ensemble_size,
         plan_horizon,
@@ -23,14 +25,10 @@ class Planner(nn.Module):
         reward_scale=1.0,
         strategy="information",
         device="cpu",
-        use_high_level=False,  # High-level planner flag
-        context_length=1,  # Context length
-        goal_achievement_scale=1.0,  # Scale for goal-achievement reward
     ):
         super().__init__()
         self.ensemble = ensemble
         self.reward_model = reward_model
-        self.goal_model = goal_model  # Store the goal model
         self.action_size = action_size
         self.ensemble_size = ensemble_size
 
@@ -46,11 +44,9 @@ class Planner(nn.Module):
         self.reward_scale = reward_scale
         self.device = device
 
-        self.use_high_level = use_high_level  # High-level planner flag
-        self.context_length = context_length
-        self.goal_achievement_scale = goal_achievement_scale
-
         if strategy == "information":
+            #Information gain is computed as a reduction in entropy between the entropy of the average of ensemble predictions and the average entropy across ensemble members
+            # It's a measure of expected reduction in uncertainty about the state by observing it, prioming actions that are expected to yield the most information.
             self.measure = InformationGain(self.ensemble, scale=expl_scale)
         elif strategy == "variance":
             self.measure = Variance(self.ensemble, scale=expl_scale)
@@ -67,14 +63,6 @@ class Planner(nn.Module):
 
         state = torch.from_numpy(state).float().to(self.device)
         state_size = state.size(0)
-        
-        # Predict the goal using the goal model
-        if self.use_high_level:
-            goal = self.goal_model(state)
-            self.current_goal = goal  # Store the current goal
-        else:
-            goal = torch.zeros(state_size).to(self.device)
-            self.current_goal = goal
 
         action_mean = torch.zeros(self.plan_horizon, 1, self.action_size).to(
             self.device
@@ -89,9 +77,7 @@ class Planner(nn.Module):
                 self.action_size,
                 device=self.device,
             )
-
-            # Perform rollout with goal transition logic
-            states, delta_vars, delta_means, goals = self.perform_rollout(state, actions)
+            states, delta_vars, delta_means = self.perform_rollout(state, actions)
 
             returns = torch.zeros(self.n_candidates).float().to(self.device)
             if self.use_exploration:
@@ -111,19 +97,11 @@ class Planner(nn.Module):
                 rewards = rewards.mean(dim=1).sum(dim=0)
                 returns += rewards
                 self.trial_rewards.append(rewards)
-
-            # Add goal-achievement reward if using high-level planner
-            if self.use_high_level:
-                goal_achievements = self.compute_goal_achievement(states, goals)
-                returns += goal_achievements * self.goal_achievement_scale
+            
+            #TODO: Define block to urn under self.use_high_level which is
+            # a return based on how well the low-level policy follows high-level goals
 
             action_mean, action_std_dev = self._fit_gaussian(actions, returns)
-
-        # Store the current goal for use in the agent
-        if self.use_high_level:
-            self.current_goal = goals[0]  # Store the first goal for the current state
-        else:
-            self.current_goal = torch.zeros(state_size).to(self.device)
 
         return action_mean[0].squeeze(dim=0)
 
@@ -132,7 +110,6 @@ class Planner(nn.Module):
         states = [torch.empty(0)] * T
         delta_means = [torch.empty(0)] * T
         delta_vars = [torch.empty(0)] * T
-        goals = [torch.empty(0)] * (T - 1)  # List to store goals for each time step
 
         current_state = current_state.unsqueeze(dim=0).unsqueeze(dim=0)
         current_state = current_state.repeat(self.ensemble_size, self.n_candidates, 1)
@@ -141,81 +118,29 @@ class Planner(nn.Module):
         actions = actions.unsqueeze(0)
         actions = actions.repeat(self.ensemble_size, 1, 1, 1).permute(1, 0, 2, 3)
 
-        c = self.context_length
-
-        # Initialize the goal at the beginning
-        if self.use_high_level:
-            with torch.no_grad():
-                goal_mu, goal_logvar = self.goal_model(
-                    current_state.mean(dim=0).mean(dim=0)
-                )
-                goal_std = torch.exp(0.5 * goal_logvar)
-                goal_eps = torch.randn_like(goal_std)
-                goal = goal_mu + goal_eps * goal_std
-        else:
-            goal = torch.zeros_like(current_state[0, 0])
-
         for t in range(self.plan_horizon):
             delta_mean, delta_var = self.ensemble(states[t], actions[t])
             if self.use_mean:
-                next_state = states[t] + delta_mean
+                """
+                Deterministic Update
+                Pros: Computationally efficient. Provides a single expected trajectory, simplifying analysis.
+                Cons: Ignores model uncertainty and stochasticity in the environment, May lead to overconfident predictions and suboptimal exploration.
+                """
+                states[t + 1] = states[t] + delta_mean
             else:
-                next_state = states[t] + self.ensemble.sample(delta_mean, delta_var)
-            states[t + 1] = next_state
+                """
+                Stochastic Update
+                Pros: Incorporates model uncertainty by considering variance. Leads to a distribution over possible future states, enhancing exploration.
+                Cons: Computationally more intensive due to sampling., Introduces randomness, which might make optimization noisier.
+                """
+                states[t + 1] = states[t] + self.ensemble.sample(delta_mean, delta_var)
             delta_means[t + 1] = delta_mean
             delta_vars[t + 1] = delta_var
 
-            if self.use_high_level:
-                if t % c == 0 and t != 0:
-                    # At context boundary, sample a new goal from the goal model
-                    with torch.no_grad():
-                        goal_mu, goal_logvar = self.goal_model(
-                            states[t].mean(dim=0).mean(dim=0)
-                        )
-                        goal_std = torch.exp(0.5 * goal_logvar)
-                        goal_eps = torch.randn_like(goal_std)
-                        goal = goal_mu + goal_eps * goal_std
-                else:
-                    # Use the goal transition function for intra-context goal generation
-                    goal = self.goal_transition(states[t], goal, states[t + 1])
-
-            goals[t] = goal  # Store the goal at time t
-
-        # Stack the lists into tensors
-        states = torch.stack(states[1:], dim=0)  # Exclude initial state
+        states = torch.stack(states[1:], dim=0)
         delta_vars = torch.stack(delta_vars[1:], dim=0)
         delta_means = torch.stack(delta_means[1:], dim=0)
-        goals = torch.stack(goals, dim=0)  # Shape: (plan_horizon, state_size)
-
-        return states, delta_vars, delta_means, goals
-
-    def goal_transition(self, state, current_goal, next_state):
-        """
-        Goal transition function:
-        next_goal = state + current_goal - next_state
-        """
-        next_goal = state + current_goal - next_state
-        return next_goal
-
-    def compute_goal_achievement(self, states, goals):
-        goal_achievements = torch.zeros(self.n_candidates).float().to(self.device)
-
-        c = self.context_length
-
-        for t in range(self.plan_horizon):
-            if t % c == c - 1:
-                # Compute goal achievement at the end of each context
-                predicted_state = states[t]  # (ensemble_size, n_candidates, state_size)
-                predicted_state = predicted_state.mean(dim=0)  # (n_candidates, state_size)
-                desired_state = states[0][0] + goals[t]  # Initial state + predicted goal
-                diff = desired_state - predicted_state  # (n_candidates, state_size)
-                distances = torch.norm(diff, dim=1)  # (n_candidates,)
-                # Negative squared distance as reward
-                goal_rewards = -distances ** 2
-                goal_achievements += goal_rewards
-
-        return goal_achievements
-
+        return states, delta_vars, delta_means
 
     def _fit_gaussian(self, actions, returns):
         returns = torch.where(torch.isnan(returns), torch.zeros_like(returns), returns)
@@ -251,3 +176,4 @@ class Planner(nn.Module):
             "mean": tensor.mean().item(),
             "std": tensor.std().item(),
         }
+

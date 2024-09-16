@@ -10,11 +10,13 @@ import numpy as np
 import torch
 from gym.wrappers.monitoring.video_recorder import VideoRecorder
 
+# from pmbrl.models.models import GoalModel
+
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from pmbrl.envs import GymEnv
 from pmbrl.training import Normalizer, Buffer, Trainer
-from pmbrl.models import EnsembleModel, RewardModel
+from pmbrl.models import EnsembleModel, RewardModel, GoalModel
 from pmbrl.control import Planner, Agent
 from pmbrl.utils import Logger
 from pmbrl import get_config
@@ -41,9 +43,10 @@ def main(args):
     )
     action_size = env.action_space.shape[0]
     state_size = env.observation_space.shape[0]
+    goal_size = state_size  # Set goal size to state size
 
     normalizer = Normalizer()
-    buffer = Buffer(state_size, action_size, args.ensemble_size, normalizer, device=DEVICE)
+    buffer = Buffer(state_size, action_size, goal_size, args.ensemble_size, normalizer, device=DEVICE)
 
     ensemble = EnsembleModel(
         state_size + action_size,
@@ -54,9 +57,12 @@ def main(args):
         device=DEVICE,
     )
     reward_model = RewardModel(state_size + action_size, args.hidden_size, device=DEVICE)
+    goal_model = GoalModel(state_size, state_size, args.hidden_size, device=DEVICE)  # Initialize GoalModel
+    
     trainer = Trainer(
         ensemble,
         reward_model,
+        goal_model,
         buffer,
         n_train_epochs=args.n_train_epochs,
         batch_size=args.batch_size,
@@ -69,6 +75,7 @@ def main(args):
     planner = Planner(
         ensemble,
         reward_model,
+        goal_model,
         action_size,
         args.ensemble_size,
         plan_horizon=args.plan_horizon,
@@ -89,6 +96,9 @@ def main(args):
     msg = "\nCollected seeds: [{} episodes | {} frames]"
     logger.log(msg.format(args.n_seed_episodes, buffer.total_steps))
 
+    # Define the real goal state of the environment
+    goal_state = env.max_reward_state 
+    
     for episode in range(1, args.n_episodes):
         logger.log("\n=== Episode {} ===".format(episode))
         start_time = time.time()
@@ -96,7 +106,8 @@ def main(args):
         msg = "Training on [{}/{}] data points"
         logger.log(msg.format(buffer.total_steps, buffer.total_steps * args.action_repeat))
         trainer.reset_models()
-        ensemble_loss, reward_loss = trainer.train()
+        ensemble_loss, reward_loss, goal_loss = trainer.train()
+        #TODO: Add goal_loss to the logger
         logger.log_losses(ensemble_loss, reward_loss)
 
         recorder = None
@@ -107,8 +118,8 @@ def main(args):
 
         logger.log("\n=== Collecting data [{}] ===".format(episode))
         reward, steps, stats = agent.run_episode(
-            buffer, action_noise=args.action_noise, recorder=recorder
-        )
+                buffer, action_noise=args.action_noise, recorder=recorder, goal_state=goal_state
+            )
         logger.log_episode(reward, steps)
         logger.log_stats(stats)
 

@@ -743,7 +743,7 @@ class Variance(object):
         return variance.sum(dim=0)
 
     def get_variance(self, delta_vars):
-        """ ensemble_size, candidates, n_dim """
+        """ensemble_size, candidates, n_dim"""
         variance = delta_vars.sum(dim=0).sum(dim=-1)
         return variance
 
@@ -771,7 +771,7 @@ class Disagreement(object):
         return disagreements.sum(dim=0)
 
     def get_disagreement(self, delta_means):
-        """ ensemble_size, candidates, n_dim """
+        """ensemble_size, candidates, n_dim"""
         disagreement = delta_means.std(dim=0).sum(dim=-1)
         return disagreement
 
@@ -798,16 +798,43 @@ class InformationGain(object):
         )
 
         for t in range(plan_horizon):
-            ent_avg = self.entropy_of_average(delta_states[t])
-            avg_ent = self.average_of_entropy(delta_vars[t])
-            info_gains[t, :] = ent_avg - avg_ent
+            """
+                Detailed explaination of Information Gain and why our environment entropy is modeled as an ensemble model.
+                https://chatgpt.com/share/66e8825f-7480-8001-b910-50fa17aa73da
+                
+                # TODO: For next paper, what'a a better world model to use then an ensemble model?
+                How to ensure that the model we use is as true as possible to true dynamics of the environment?
+                Is there a better way to represent the true dynamics of the environment?
+                
+                
+                In practice, especially in model-based reinforcement learning and active inference frameworks, 
+                the ensemble model serves as an approximation of the true dynamics of the environment. 
+                
+                Model Approximation:
+                The ensemble represents multiple hypotheses about the environment's dynamics. 
+                By aggregating these predictions, entropy_of_average captures the uncertainty modeled by the ensemble, serving as a stand-in for the true entropy H(Y).
+
+                Ensemble as Proxy for True Distribution:
+                In scenarios where the true distribution is unknown or intractable, an ensemble model provides a practical way to estimate 
+                H(Y). The diversity within the ensemble captures model uncertainty, which is crucial for effective exploration.
+
+                Y: Future state of the environment.
+                X: Ensemble model's predictions based on a candidate action sequence.
+                H(Y): Entropy of Y (uncertainty about without any knowledge of X).
+                H(Y∣X): Conditional entropy of Y given X (remaining uncertainty about Y after knowing X).
+                I(Y; X): Mutual information between Y and X (reduction in uncertainty about Y after knowing X).
+
+            """
+            ent_avg = self.entropy_of_average(delta_states[t])  # Estimates H(Y) - Entropy of the -- supposed true, approximated using model itself-- dynamics of the environment
+            avg_ent = self.average_of_entropy(delta_vars[t])  # Estimates H(Y | X)
+            info_gains[t, :] = ent_avg - avg_ent  # Computes I(Y; X)
 
         info_gains = info_gains * self.scale
         return info_gains.sum(dim=0)
 
     def entropy_of_average(self, samples):
         """
-        samples (ensemble_size, n_candidates, n_dim) 
+        samples (ensemble_size, n_candidates, n_dim)
         """
         samples = samples.permute(1, 0, 2)
         n_samples = samples.size(1)
@@ -849,6 +876,7 @@ class InformationGain(object):
             torch.log(2 * np.pi * np.e * torch.clamp(delta_vars, min=min_variance)),
             dim=len(delta_vars.size()) - 1,
         )
+
 
 # End file: pmbrl/control/measures.py
 
@@ -1070,3 +1098,38 @@ if __name__ == "__main__":
 # End file: scripts/train.py
 
 ==============================
+I would like to to extend this active inference agent that operates in OpenAI Gym and DeepMind enviornemnts
+to use a hierarchical framework. In this extension, we a have a high-level planner model that generates goals.
+It can be modeled as a gaussian distribution over the state space. The posterior of the goal model will be compsoed for prior which 
+is another guassian centered at the goal state of the enviroment with unit-variance. And the likeihood will be computed through interactions with the environment.
+Some ideas for this likelihood is that we want to promote archieving the max reward state (from the current state) in as few steps as possible.
+This likely means that this goals posterior function should also be condititoned on current state. I am not sure exactly how to formulate this yet.
+But in any case, our buffer will now incude goals. There should be as many goals in the buffer as there are states. 
+Each goal sampled from the goal model will be valid for c time steps where c is the context-length. c(T) should be a function of plan horizon T.
+c should divide T evenly. We can define as c(T) = int(T / n) where n is the number of goals in the buffer and is a hyperparameter.
+Once we sample a goal, this goal is interpreated as the desired goal state for the current context. The agent will then plan to reach this goal in the next c time steps.
+However, since we want the buffer to have a goal for every state, we will huse a goal transition function to deterministically compute the all missing intra-context goals.
+Our higher-level policy produces goals gt indicating desired relative changes in state observations.
+That is, at step t, the higher-level policy produces a goal gt, indicating its desire for the lower-level
+agent to take actions that yield it an observation st+c that is close to st + gt. Although some state
+dimensions are more natural as goal subspaces, we chose this more generic goal representation to make it broadly applicable, without any manual
+design of goal spaces, primitives, or controllable dimensions. This makes our method general and easy to apply to new problem settings. 
+To maintain the same absolute position of the goal regardless of state change, the goal transition model h is deﬁned as
+h(st, gt, st+1) = st + gt − st+1. We deﬁne the intrinsic reward as a parameterized reward function based on the distance between the
+current observation and the goal observation: r(st, gt, at, st+1) = −||st + gt − st+1||2. 
+This rewards the lower-level policy for taking actions that yield observations that are close to
+the desired value st + gt.
+
+Now that we have a high-level planner that generates goals, we can use the low-level planner to generate actions that will help us reach these goals.
+Currently, our low level-planner is comprised of an ensemble state transition modelthat predicts the next state given the current state and action, a reward model that predicts the reward of a state so we can add 
+an exploration bonus, and an action selection model that selects the best action.
+While selecting actions in the forward function of Planner, we should implement the TODO of creating a if self.use_high_level: block that will add a goal-achievment reward to the returns for each candidate action sequence.
+
+This way achieving closeness to the goal state will be rewarded as part of the selection the top-k best action sequences, and the selected action sequences will promote achieving the desired goal.
+
+
+Please make the necessary changes to the code to implement this hierarchical active inference agent. Including all other code sections that require modifications but I have not mentioned here.
+To ensure that the code successfully builds on top of the existing code, please make sure that our changes are minimal only the strict necessary to implement the hierarchical active inference agent.
+Please use your best judgement as a PHD-level researcher and data scientist to make the necessary modifications of the code and ensure that the implementation is correct and yields the desired results.
+keep the code modular. For ease of maintenance and extension in the future. For example the goal model should be a separate class that can be easily swapped out for another model. The goal transition 
+function should also be easily swappable as well as the definition of the goal-achievement bonus.

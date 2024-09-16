@@ -179,3 +179,4 @@ class InformationGain(object):
             torch.log(2 * np.pi * np.e * torch.clamp(delta_vars, min=min_variance)),
             dim=len(delta_vars.size()) - 1,
         )
+

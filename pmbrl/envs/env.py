@@ -1,4 +1,5 @@
 import gym
+import numpy as np
 
 SPARSE_MOUNTAIN_CAR = "SparseMountainCar"
 HALF_CHEETAH_RUN = "HalfCheetahRun"
@@ -12,6 +13,7 @@ class GymEnv(object):
     def __init__(self, env_name, max_episode_len, action_repeat=1, seed=None):
         self._env = self._get_env_object(env_name)
         self.max_episode_len = max_episode_len
+        self.max_reward_state = self._get_max_reward_state(env_name)
         self.action_repeat = action_repeat
         self.done = False
         if seed is not None:
@@ -89,3 +91,20 @@ class GymEnv(object):
             return DeepMindWrapper(domain="reacher", task="easy")
         else:
             return gym.make(env_name)
+        
+    def _get_max_reward_state(self, env_name):
+        if env_name == SPARSE_MOUNTAIN_CAR:
+            return np.array([-0.5, 0])
+        elif env_name == HALF_CHEETAH_RUN:
+            return np.array([1, 0, 0])  # Replace with actual max reward state
+        elif env_name == HALF_CHEETAH_FLIP:
+            return np.array([0, 0, 0])  # Replace with actual max reward state
+        elif env_name == ANT_MAZE:
+            return np.array([0, 0])  # Replace with actual max reward state
+        elif env_name == DM_REACHER:
+            return np.array([1, 1])  # Replace with actual max reward state
+        elif env_name == DM_CATCH:
+            return np.array([0, 0])  # Replace with actual max reward state
+        else:
+            # Default max reward state for Pendulum or other unknown environments
+            return np.array([1, 0, 0])
