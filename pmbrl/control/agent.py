@@ -96,7 +96,7 @@ class Agent(object):
         # Render the frame
         frame = self.env.unwrapped.render(mode="rgb_array")
         goal = self.current_goal
-        self.logger.log(f"goal : {goal}")
+        # self.logger.log(f"goal : {goal}")
 
         if frame is not None:
             img = Image.fromarray(frame)

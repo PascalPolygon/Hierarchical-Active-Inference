@@ -89,6 +89,10 @@ class Planner(nn.Module):
 
         self.trial_rewards = []
         self.trial_bonuses = []
+        
+        self.logger.log(f'subgoal scale: {self.subgoal_scale}')
+        self.logger.log(f'global goal scale: {self.global_goal_scale}')
+        self.logger.log(f'Goal achievement scale: {self.goal_achievement_scale}')
         self.to(device)
 
     def forward(self, state):
@@ -105,6 +109,9 @@ class Planner(nn.Module):
 
         # Generate subgoals by simulating future states
         goal_mean = self.generate_feasible_subgoals(state, num_subgoals)
+
+        # Select the current subgoal (e.g., the first one)
+        current_subgoal = goal_mean[0]  # Shape: (state_size,)
 
         for iter in range(self.optimisation_iters):
             # Sample action candidates
@@ -142,11 +149,9 @@ class Planner(nn.Module):
                 returns += expl_bonus
                 self.trial_bonuses.append(expl_bonus)
 
-            # Add goal-achievement reward
-            if self.use_high_level:
-                goal_achievements = self.compute_goal_achievement(states, goal_mean)
-                # returns += goal_achievements * self.goal_achievement_scale
-                returns += goal_achievements * 1.0
+            # Add subgoal distance penalty
+            subgoal_penalty = self.compute_subgoal_distance_penalty(states, current_subgoal)
+            returns += subgoal_penalty
 
             # Update action distributions using top candidates
             action_mean, action_std_dev = self._update_action_distribution(
@@ -156,8 +161,8 @@ class Planner(nn.Module):
         # Extract the first action to return
         selected_action = action_mean[0].squeeze(dim=0)  # Shape: (action_size,)
 
-        # For visualization, return the first subgoal
-        selected_goal = goal_mean[0]  # Shape: (goal_size,)
+        # For visualization, return the current subgoal
+        selected_goal = current_subgoal  # Shape: (goal_size,)
 
         return selected_action, selected_goal
 
@@ -289,6 +294,32 @@ class Planner(nn.Module):
         delta_means = torch.stack(delta_means, dim=0)
 
         return states, delta_vars, delta_means
+    
+    def compute_subgoal_distance_penalty(self, states, current_subgoal):
+        """
+        Compute a penalty based on the expected distance to the current subgoal at the end of the planning horizon.
+
+        Args:
+            states (torch.Tensor): Predicted states from rollouts, shape (plan_horizon, ensemble_size, n_candidates, state_size)
+            current_subgoal (torch.Tensor): The current subgoal, shape (state_size,)
+
+        Returns:
+            torch.Tensor: Subgoal distance penalties for each candidate, shape (n_candidates,)
+        """
+        # Use the last predicted state
+        predicted_state = states[-1]  # Shape: (ensemble_size, n_candidates, state_size)
+        predicted_state = predicted_state.mean(dim=0)  # Mean over ensemble: (n_candidates, state_size)
+        desired_state = current_subgoal.unsqueeze(0).repeat(self.n_candidates, 1)  # (n_candidates, state_size)
+
+        # Compute distance between predicted state and current subgoal
+        diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
+        distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
+
+        # Compute subgoal distance penalty (negative reward)
+        subgoal_penalty = -self.subgoal_scale * distance_subgoal
+
+        return subgoal_penalty
+
 
     def perform_rollout(self, current_state, actions):
         T = self.plan_horizon + 1

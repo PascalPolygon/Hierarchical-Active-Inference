@@ -40,8 +40,10 @@ def get_config(args):
     # config.initial_goal_std = args.initial_goal_std
     # config.goal_std_decay = args.goal_std_decay
     # config.min_goal_std = args.min_goal_std
-    # config.goal_mean_weight = args.goal_mean_weight
     config.goal_achievement_scale = args.goal_achievement_scale
+    config.goal_mean_weight = args.goal_mean_weight
+    config.global_goal_scale = args.global_goal_scale
+    config.subgoal_scale = args.subgoal_scale
 
     return config
 
@@ -94,6 +96,9 @@ class Config(object):
         self.min_goal_std = 0.1
         self.goal_mean_weight = 0.5
         self.goal_achievement_scale = 0.1
+        self.subgoal_scale = 1.0
+        self.global_goal_scale = 1.0
+        
 
     def set_logdir(self, logdir):
         self.logdir = logdir
@@ -121,7 +126,7 @@ class DebugConfig(Config):
         self.max_episode_len = 200
         self.hidden_size = 64
         self.plan_horizon = 5
-        self.context_length = 10
+        self.context_length = 3
         self.record_every = 0  # Record every episode for debugging
 
         # Overriding new parameters for debugging

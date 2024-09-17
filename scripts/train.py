@@ -128,8 +128,8 @@ def main(args):
         # min_goal_std=args.min_goal_std,
         # goal_mean_weight=args.goal_mean_weight,
         # Additional parameters
-        subgoal_scale=1.0,
-        global_goal_scale=1.0,
+        subgoal_scale=args.subgoal_scale,
+        global_goal_scale=args.global_goal_scale,
         logger=logger,  # Pass the logger here
     )
 
@@ -179,7 +179,10 @@ if __name__ == "__main__":
     # parser.add_argument("--goal_std_decay", type=float, default=0.99)
     # parser.add_argument("--min_goal_std", type=float, default=0.1)
     parser.add_argument("--goal_mean_weight", type=float, default=0.8)
-    parser.add_argument("--goal_achievement_scale", type=float, default=10.0)
+    parser.add_argument("--goal_achievement_scale", type=float, default=1000.0)
+    parser.add_argument("--subgoal_scale", type=float, default=10.0)
+    parser.add_argument("--global_goal_scale", type=float, default=10.0)
+    
 
     args = parser.parse_args()
     config = get_config(args)
