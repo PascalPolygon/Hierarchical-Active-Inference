@@ -1,6 +1,7 @@
 # pylint: disable=not-callable
 # pylint: disable=no-member
 
+# Begin file: scripts/train.py
 import sys
 import time
 import pathlib
@@ -10,28 +11,21 @@ import numpy as np
 import torch
 from gym.wrappers.monitoring.video_recorder import VideoRecorder
 
-# from pmbrl.models.models import GoalModel
-
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from pmbrl.envs import GymEnv
 from pmbrl.training import Normalizer, Buffer, Trainer
-from pmbrl.models import EnsembleModel, RewardModel, GoalModel
+from pmbrl.models import EnsembleModel, RewardModel
 from pmbrl.control import Planner, Agent
 from pmbrl.utils import Logger
 from pmbrl import get_config
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
 def main(args):
     logger = Logger(args.logdir, args.seed)
     logger.log("\n=== Loading experiment [device: {}] ===\n".format(DEVICE))
     logger.log(args)
-
-    rate_buffer = None
-    if args.coverage:
-        from pmbrl.envs.envs.ant import rate_buffer
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -43,10 +37,9 @@ def main(args):
     )
     action_size = env.action_space.shape[0]
     state_size = env.observation_space.shape[0]
-    goal_size = state_size  # Set goal size to state size
 
     normalizer = Normalizer()
-    buffer = Buffer(state_size, action_size, goal_size, args.ensemble_size, normalizer, device=DEVICE)
+    buffer = Buffer(state_size, action_size, args.ensemble_size, normalizer, device=DEVICE)
 
     ensemble = EnsembleModel(
         state_size + action_size,
@@ -57,12 +50,10 @@ def main(args):
         device=DEVICE,
     )
     reward_model = RewardModel(state_size + action_size, args.hidden_size, device=DEVICE)
-    goal_model = GoalModel(state_size, state_size, args.hidden_size, device=DEVICE)  # Initialize GoalModel
-    
+
     trainer = Trainer(
         ensemble,
         reward_model,
-        goal_model,
         buffer,
         n_train_epochs=args.n_train_epochs,
         batch_size=args.batch_size,
@@ -72,10 +63,12 @@ def main(args):
         logger=logger,
     )
 
+    # Define the global goal state (maximum reward state)
+    global_goal_state = env.max_reward_state  # Ensure your environment has this method
+
     planner = Planner(
         ensemble,
         reward_model,
-        goal_model,
         action_size,
         args.ensemble_size,
         plan_horizon=args.plan_horizon,
@@ -88,48 +81,52 @@ def main(args):
         expl_scale=args.expl_scale,
         reward_scale=args.reward_scale,
         strategy=args.strategy,
+        use_high_level=True,
+        context_length=args.context_length,
+        goal_achievement_scale=args.goal_achievement_scale,
+        global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
         device=DEVICE,
+        # New parameters
+        global_goal_weight=args.global_goal_weight,
+        max_subgoal_distance=args.max_subgoal_distance,
+        initial_goal_std=args.initial_goal_std,
+        goal_std_decay=args.goal_std_decay,
+        min_goal_std=args.min_goal_std,
+        goal_mean_weight=args.goal_mean_weight,
     )
+
     agent = Agent(env, planner, logger=logger)
 
     agent.get_seed_episodes(buffer, args.n_seed_episodes)
     msg = "\nCollected seeds: [{} episodes | {} frames]"
     logger.log(msg.format(args.n_seed_episodes, buffer.total_steps))
 
-    # Define the real goal state of the environment
-    goal_state = env.max_reward_state 
-    
-    for episode in range(1, args.n_episodes):
+    for episode in range(1, args.n_episodes + 1):
         logger.log("\n=== Episode {} ===".format(episode))
         start_time = time.time()
 
         msg = "Training on [{}/{}] data points"
         logger.log(msg.format(buffer.total_steps, buffer.total_steps * args.action_repeat))
         trainer.reset_models()
-        ensemble_loss, reward_loss, goal_loss = trainer.train()
-        #TODO: Add goal_loss to the logger
+        ensemble_loss, reward_loss = trainer.train()
         logger.log_losses(ensemble_loss, reward_loss)
 
         recorder = None
+        print(f'Recording every {args.record_every} episodes, episode: {episode}')
         if args.record_every is not None and args.record_every % episode == 0:
             filename = logger.get_video_path(episode)
             recorder = VideoRecorder(env.unwrapped, path=filename)
-            logger.log("Setup recoder @ {}".format(filename))
+            logger.log("Setup recorder @ {}".format(filename))
 
         logger.log("\n=== Collecting data [{}] ===".format(episode))
         reward, steps, stats = agent.run_episode(
-                buffer, action_noise=args.action_noise, recorder=recorder, goal_state=goal_state
+                buffer, action_noise=args.action_noise, recorder=recorder
             )
         logger.log_episode(reward, steps)
         logger.log_stats(stats)
 
-        if args.coverage:
-            coverage = rate_buffer(buffer=buffer)
-            logger.log_coverage(coverage)
-
         logger.log_time(time.time() - start_time)
         logger.save()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -137,6 +134,15 @@ if __name__ == "__main__":
     parser.add_argument("--config_name", type=str, default="mountain_car")
     parser.add_argument("--strategy", type=str, default="information")
     parser.add_argument("--seed", type=int, default=0)
+    # In scripts/train.py
+    parser.add_argument("--global_goal_weight", type=float, default=1.0)
+    parser.add_argument("--max_subgoal_distance", type=float, default=1.0)
+    parser.add_argument("--initial_goal_std", type=float, default=1.0)
+    parser.add_argument("--goal_std_decay", type=float, default=0.99)
+    parser.add_argument("--min_goal_std", type=float, default=0.1)
+    parser.add_argument("--goal_mean_weight", type=float, default=0.5)
+    parser.add_argument("--goal_achievement_scale", type=float, default=0.1)
+
     args = parser.parse_args()
     config = get_config(args)
     main(config)

@@ -1,1 +1,1 @@
-from .models import EnsembleModel, RewardModel, GoalModel
+from .models import EnsembleModel, RewardModel

@@ -1,3 +1,4 @@
+# Begin file: pmbrl/configs.py
 import pprint
 
 MOUNTAIN_CAR_CONFIG = "mountain_car"
@@ -9,7 +10,7 @@ ANT_MAZE = "ant_maze"
 DEBUG_CONFIG = "debug"
 
 def print_configs():
-    print(f"[{MOUNTAIN_CAR_CONFIG}, {CUP_CATCH_CONFIG}, {HALF_CHEETAH_RUN_CONFIG}, {HALF_CHEETAH_FLIP_CONFIG}, {REACHER_CONFIG}, {ANT_MAZE}, {DEBUG_CONFIG} ")
+    print(f"[{MOUNTAIN_CAR_CONFIG}, {CUP_CATCH_CONFIG}, {HALF_CHEETAH_RUN_CONFIG}, {HALF_CHEETAH_FLIP_CONFIG}, {REACHER_CONFIG}, {ANT_MAZE}, {DEBUG_CONFIG}]")
 
 def get_config(args):
     if args.config_name == MOUNTAIN_CAR_CONFIG:
@@ -32,9 +33,19 @@ def get_config(args):
     config.set_logdir(args.logdir)
     config.set_seed(args.seed)
     config.set_strategy(args.strategy)
+    
+    # Set new parameters from args
+    config.global_goal_weight = args.global_goal_weight
+    config.max_subgoal_distance = args.max_subgoal_distance
+    config.initial_goal_std = args.initial_goal_std
+    config.goal_std_decay = args.goal_std_decay
+    config.min_goal_std = args.min_goal_std
+    config.goal_mean_weight = args.goal_mean_weight
+    config.goal_achievement_scale = args.goal_achievement_scale
+
     return config
 
-#TODO: Experiment with various context_lengths for each environment
+# Base Configuration Class
 class Config(object):
     def __init__(self):
         self.logdir = "log"
@@ -63,7 +74,7 @@ class Config(object):
         self.n_candidates = 500
         self.top_candidates = 50
 
-        self.expl_strategy = "information"
+        self.strategy = "information"  # Renamed from expl_strategy to strategy for consistency
         self.use_reward = True
         self.use_exploration = True
         self.use_mean = False
@@ -74,6 +85,15 @@ class Config(object):
 
         self.context_length = 7
         self.n_experiments = 3
+
+        # New parameters with default values
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
 
     def set_logdir(self, logdir):
         self.logdir = logdir
@@ -88,16 +108,7 @@ class Config(object):
         return pprint.pformat(vars(self))
 
 
-# class DebugConfig(Config):
-#     def __init__(self):
-#         super().__init__()
-#         self.env_name = "Pendulum-v0"
-#         self.n_episodes = 3
-#         self.n_train_epochs = 200
-#         self.max_episode_len = 10
-#         self.hidden_size = 64
-#         self.plan_horizon = 5
-#         self.context_length = 2
+# Derived Configuration Classes
 
 class DebugConfig(Config):
     def __init__(self):
@@ -111,30 +122,38 @@ class DebugConfig(Config):
         self.context_length = 2
         self.record_every = 0  # Record every episode for debugging
 
+        # Overriding new parameters for debugging
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
+
 
 class MountainCarConfig(Config):
     def __init__(self):
         super().__init__()
         self.logdir = "mountain_car"
         self.env_name = "SparseMountainCar"
-        # self.max_episode_len = 500
-        # self.n_train_epochs = 100
-        # self.n_seed_episodes = 1
-        # self.expl_scale = 1.0
-        # self.action_noise_scale = 0.1
-        # self.n_episodes = 30
-        # self.ensemble_size = 25
-        # self.record_every = None
-        # self.n_episodes = 50
 
         self.max_episode_len = 5
         self.n_train_epochs = 1
         self.n_seed_episodes = 1
         self.expl_scale = 1.0
-        self.n_episodes = 3
+        self.n_episodes = 5
         self.ensemble_size = 5
         self.record_every = None
-        self.n_episodes = 5
+
+        # Overriding new parameters for Mountain Car
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
 
 
 class CupCatchConfig(Config):
@@ -149,6 +168,15 @@ class CupCatchConfig(Config):
         self.action_noise_scale = 0.2
         self.record_every = None
         self.n_episodes = 50
+
+        # Overriding new parameters for Cup Catch
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
 
 
 class HalfCheetahRunConfig(Config):
@@ -177,6 +205,15 @@ class HalfCheetahRunConfig(Config):
         self.expl_scale = 0.1
         self.action_noise_scale = 0.3
 
+        # Overriding new parameters for Half Cheetah Run
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
+
 
 class HalfCheetahFlipConfig(Config):
     def __init__(self):
@@ -203,6 +240,15 @@ class HalfCheetahFlipConfig(Config):
         self.use_mean = True
         self.expl_scale = 0.1
         self.action_noise_scale = 0.4
+
+        # Overriding new parameters for Half Cheetah Flip
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
 
 
 class AntMazeConfig(Config):
@@ -233,6 +279,15 @@ class AntMazeConfig(Config):
         self.expl_scale = 1.0
         self.action_noise_scale = 0.5
 
+        # Overriding new parameters for Ant Maze
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1
+
 
 class ReacherConfig(Config):
     def __init__(self):
@@ -260,3 +315,12 @@ class ReacherConfig(Config):
         self.use_mean = True
         self.expl_scale = 0.1
         self.action_noise_scale = 0.1
+
+        # Overriding new parameters for Reacher
+        self.global_goal_weight = 1.0
+        self.max_subgoal_distance = 1.0
+        self.initial_goal_std = 1.0
+        self.goal_std_decay = 0.99
+        self.min_goal_std = 0.1
+        self.goal_mean_weight = 0.5
+        self.goal_achievement_scale = 0.1

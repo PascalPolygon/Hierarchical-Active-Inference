@@ -13,18 +13,15 @@ from .configs import *
 
 ==============================
 # Begin file: pmbrl/training/buffer.py
-# pylint: disable=not-callable
-# pylint: disable=no-member
-
 import torch
 import numpy as np
-
 
 class Buffer(object):
     def __init__(
         self,
         state_size,
         action_size,
+        goal_size,  # Added goal_size
         ensemble_size,
         normalizer,
         signal_noise=None,
@@ -33,6 +30,7 @@ class Buffer(object):
     ):
         self.state_size = state_size
         self.action_size = action_size
+        self.goal_size = goal_size  # Store goal size
         self.ensemble_size = ensemble_size
         self.buffer_size = buffer_size
         self.signal_noise = signal_noise
@@ -42,11 +40,12 @@ class Buffer(object):
         self.actions = np.zeros((buffer_size, action_size))
         self.rewards = np.zeros((buffer_size, 1))
         self.state_deltas = np.zeros((buffer_size, state_size))
+        self.goals = np.zeros((buffer_size, goal_size))  # Initialize goals array
 
         self.normalizer = normalizer
         self._total_steps = 0
 
-    def add(self, state, action, reward, next_state):
+    def add(self, state, action, reward, next_state, goal_state):
         idx = self._total_steps % self.buffer_size
         state_delta = next_state - state
 
@@ -54,9 +53,11 @@ class Buffer(object):
         self.actions[idx] = action
         self.rewards[idx] = reward
         self.state_deltas[idx] = state_delta
+        self.goals[idx] = goal_state - state  # Store desired goal as s_goal - s_t
         self._total_steps += 1
 
         self.normalizer.update(state, action, state_delta)
+
 
     def get_train_batches(self, batch_size):
         size = len(self)
@@ -80,11 +81,13 @@ class Buffer(object):
             actions = self.actions[batch_indices]
             rewards = self.rewards[batch_indices]
             state_deltas = self.state_deltas[batch_indices]
+            goals = self.goals[batch_indices]  # Retrieve goals
 
             states = torch.from_numpy(states).float().to(self.device)
             actions = torch.from_numpy(actions).float().to(self.device)
             rewards = torch.from_numpy(rewards).float().to(self.device)
             state_deltas = torch.from_numpy(state_deltas).float().to(self.device)
+            goals = torch.from_numpy(goals).float().to(self.device)  # Convert goals to tensor
 
             if self.signal_noise is not None:
                 states = states + self.signal_noise * torch.randn_like(states)
@@ -95,8 +98,11 @@ class Buffer(object):
             state_deltas = state_deltas.reshape(
                 self.ensemble_size, batch_size, self.state_size
             )
+            goals = goals.reshape(
+                self.ensemble_size, batch_size, self.goal_size
+            )  # Reshape goals
 
-            yield states, actions, rewards, state_deltas
+            yield states, actions, rewards, state_deltas, goals  # Include goals
 
     def __len__(self):
         return min(self._total_steps, self.buffer_size)
@@ -115,13 +121,12 @@ class Buffer(object):
 # pylint: disable=no-member
 
 import torch
-
-
 class Trainer(object):
     def __init__(
         self,
         ensemble,
         reward_model,
+        goal_model,  # Added goal_model
         buffer,
         n_train_epochs,
         batch_size,
@@ -132,6 +137,7 @@ class Trainer(object):
     ):
         self.ensemble = ensemble
         self.reward_model = reward_model
+        self.goal_model = goal_model  # Store the goal model
         self.buffer = buffer
         self.n_train_epochs = n_train_epochs
         self.batch_size = batch_size
@@ -140,28 +146,37 @@ class Trainer(object):
         self.grad_clip_norm = grad_clip_norm
         self.logger = logger
 
-        self.params = list(ensemble.parameters()) + list(reward_model.parameters())
+        self.params = (
+            list(ensemble.parameters())
+            + list(reward_model.parameters())
+            + list(goal_model.parameters())  # Include goal model parameters
+        )
         self.optim = torch.optim.Adam(self.params, lr=learning_rate, eps=epsilon)
 
     def train(self):
         e_losses = []
         r_losses = []
+        g_losses = []  # Goal model losses
         n_batches = []
         for epoch in range(1, self.n_train_epochs + 1):
             e_losses.append([])
             r_losses.append([])
+            g_losses.append([])  # Initialize goal model loss list
             n_batches.append(0)
 
-            for (states, actions, rewards, deltas) in self.buffer.get_train_batches(
+            for (states, actions, rewards, deltas, goals) in self.buffer.get_train_batches(
                 self.batch_size
             ):
                 self.ensemble.train()
                 self.reward_model.train()
+                self.goal_model.train()  # Set goal model to training mode
 
                 self.optim.zero_grad()
                 e_loss = self.ensemble.loss(states, actions, deltas)
                 r_loss = self.reward_model.loss(states, actions, rewards)
-                (e_loss + r_loss).backward()
+                g_loss = self.goal_model_loss(states, goals)  # Compute goal model loss
+                total_loss = e_loss + r_loss + g_loss
+                total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     self.params, self.grad_clip_norm, norm_type=2
                 )
@@ -169,24 +184,30 @@ class Trainer(object):
 
                 e_losses[epoch - 1].append(e_loss.item())
                 r_losses[epoch - 1].append(r_loss.item())
+                g_losses[epoch - 1].append(g_loss.item())
                 n_batches[epoch - 1] += 1
 
             if self.logger is not None and epoch % 20 == 0:
                 avg_e_loss = self._get_avg_loss(e_losses, n_batches, epoch)
                 avg_r_loss = self._get_avg_loss(r_losses, n_batches, epoch)
-                message = "> Train epoch {} [ensemble {:.2f} | reward {:.2f}]"
-                self.logger.log(message.format(epoch, avg_e_loss, avg_r_loss))
+                avg_g_loss = self._get_avg_loss(g_losses, n_batches, epoch)
+                message = "> Train epoch {} [ensemble {:.2f} | reward {:.2f} | goal {:.2f}]"
+                self.logger.log(message.format(epoch, avg_e_loss, avg_r_loss, avg_g_loss))
 
         return (
             self._get_avg_loss(e_losses, n_batches, epoch),
             self._get_avg_loss(r_losses, n_batches, epoch),
+            self._get_avg_loss(g_losses, n_batches, epoch),  # Return goal model loss
         )
 
     def reset_models(self):
         self.ensemble.reset_parameters()
         self.reward_model.reset_parameters()
-        self.params = list(self.ensemble.parameters()) + list(
-            self.reward_model.parameters()
+        self.goal_model.reset_parameters()  # Reset goal model parameters
+        self.params = (
+            list(self.ensemble.parameters())
+            + list(self.reward_model.parameters())
+            + list(self.goal_model.parameters())
         )
         self.optim = torch.optim.Adam(
             self.params, lr=self.learning_rate, eps=self.epsilon
@@ -195,6 +216,22 @@ class Trainer(object):
     def _get_avg_loss(self, losses, n_batches, epoch):
         epoch_loss = [sum(loss) / n_batch for loss, n_batch in zip(losses, n_batches)]
         return sum(epoch_loss) / epoch
+
+    def goal_model_loss(self, states, goals):
+        # Since the goal is defined as s_goal - s_t
+        # states shape: (ensemble_size, batch_size, state_size)
+        # goals shape: (ensemble_size, batch_size, goal_size)
+        states_mean = states.mean(dim=0)  # (batch_size, state_size)
+        goals_mean = goals.mean(dim=0)    # (batch_size, goal_size)
+
+        predicted_goals = self.goal_model(states_mean)  # (batch_size, goal_size)
+        desired_goals = goals_mean  # (batch_size, goal_size)
+
+        # Mean squared error loss
+        loss = torch.mean((predicted_goals - desired_goals) ** 2)
+        return loss
+
+
 
 # End file: pmbrl/training/trainer.py
 
@@ -502,6 +539,30 @@ class RewardModel(nn.Module):
         self.fc_2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc_3 = nn.Linear(self.hidden_size, 1)
         self.to(self.device)
+class GoalModel(nn.Module):
+    def __init__(self, state_size, goal_size, hidden_size, device='cpu'):
+        super(GoalModel, self).__init__()
+        self.state_size = state_size
+        self.goal_size = goal_size
+        self.hidden_size = hidden_size
+        self.device = device
+
+        self.fc1 = nn.Linear(state_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc_out = nn.Linear(hidden_size, goal_size)
+        self.to(device)
+
+    def forward(self, state):
+        h = torch.relu(self.fc1(state))
+        h = torch.relu(self.fc2(h))
+        goal = self.fc_out(h)
+        return goal  # Predicted goal vector
+
+    def reset_parameters(self):
+        self.fc1.reset_parameters()
+        self.fc2.reset_parameters()
+        self.fc_out.reset_parameters()
+        self.to(self.device)
 
 # End file: pmbrl/models/models.py
 
@@ -509,14 +570,10 @@ class RewardModel(nn.Module):
 
 ==============================
 # Begin file: pmbrl/control/planner.py
-# pylint: disable=not-callable
-# pylint: disable=no-member
-
 import torch
 import torch.nn as nn
 
 from pmbrl.control.measures import InformationGain, Disagreement, Variance, Random
-
 
 class Planner(nn.Module):
     def __init__(
@@ -536,6 +593,17 @@ class Planner(nn.Module):
         reward_scale=1.0,
         strategy="information",
         device="cpu",
+        use_high_level=False,  # High-level planner flag
+        context_length=1,  # Context length
+        goal_achievement_scale=1.0,  # Scale for goal-achievement reward
+        global_goal_state=None,  # The known global goal state
+        # New parameters
+        global_goal_weight=1.0,
+        max_subgoal_distance=1.0,
+        initial_goal_std=1.0,
+        goal_std_decay=0.99,
+        min_goal_std=0.1,
+        goal_mean_weight=0.5,
     ):
         super().__init__()
         self.ensemble = ensemble
@@ -555,9 +623,20 @@ class Planner(nn.Module):
         self.reward_scale = reward_scale
         self.device = device
 
+        self.use_high_level = use_high_level  # High-level planner flag
+        self.context_length = context_length
+        self.goal_achievement_scale = goal_achievement_scale
+        self.global_goal_state = global_goal_state.to(device)  # Ensure on correct device
+
+        # New parameters
+        self.global_goal_weight = global_goal_weight
+        self.max_subgoal_distance = max_subgoal_distance
+        self.initial_goal_std = initial_goal_std
+        self.goal_std_decay = goal_std_decay
+        self.min_goal_std = min_goal_std
+        self.goal_mean_weight = goal_mean_weight
+
         if strategy == "information":
-            #Information gain is computed as a reduction in entropy between the entropy of the average of ensemble predictions and the average entropy across ensemble members
-            # It's a measure of expected reduction in uncertainty about the state by observing it, prioming actions that are expected to yield the most information.
             self.measure = InformationGain(self.ensemble, scale=expl_scale)
         elif strategy == "variance":
             self.measure = Variance(self.ensemble, scale=expl_scale)
@@ -575,26 +654,43 @@ class Planner(nn.Module):
         state = torch.from_numpy(state).float().to(self.device)
         state_size = state.size(0)
 
+        # Initialize action and subgoal distributions
         action_mean = torch.zeros(self.plan_horizon, 1, self.action_size).to(
             self.device
         )
         action_std_dev = torch.ones(self.plan_horizon, 1, self.action_size).to(
             self.device
         )
+
+        # For subgoals, determine how many subgoals we have based on the context length
+        num_subgoals = (self.plan_horizon + self.context_length - 1) // self.context_length
+        goal_size = state_size  # Assuming goal is in the same space as state
+
+        goal_mean = self.global_goal_state.unsqueeze(0).unsqueeze(1).repeat(num_subgoals, 1, 1)  # Shape: (num_subgoals, 1, goal_size)
+        goal_std_dev = torch.ones(num_subgoals, 1, goal_size).to(self.device) * self.initial_goal_std
+
         for _ in range(self.optimisation_iters):
+            # Sample action candidates
             actions = action_mean + action_std_dev * torch.randn(
                 self.plan_horizon,
                 self.n_candidates,
                 self.action_size,
                 device=self.device,
             )
+
+            # Sample subgoal candidates
+            goals = goal_mean + goal_std_dev * torch.randn(
+                num_subgoals,
+                self.n_candidates,
+                goal_size,
+                device=self.device,
+            )
+
+            # Perform rollout with sampled actions and subgoals
             states, delta_vars, delta_means = self.perform_rollout(state, actions)
 
+            # Compute returns
             returns = torch.zeros(self.n_candidates).float().to(self.device)
-            if self.use_exploration:
-                expl_bonus = self.measure(delta_means, delta_vars) * self.expl_scale
-                returns += expl_bonus
-                self.trial_bonuses.append(expl_bonus)
 
             if self.use_reward:
                 _states = states.view(-1, state_size)
@@ -608,19 +704,32 @@ class Planner(nn.Module):
                 rewards = rewards.mean(dim=1).sum(dim=0)
                 returns += rewards
                 self.trial_rewards.append(rewards)
-            
-            #TODO: Define block to urn under self.use_high_level which is
-            # a return based on how well the low-level policy follows high-level goals
 
-            action_mean, action_std_dev = self._fit_gaussian(actions, returns)
+            if self.use_exploration:
+                expl_bonus = self.measure(delta_means, delta_vars) * self.expl_scale
+                returns += expl_bonus
+                self.trial_bonuses.append(expl_bonus)
+
+            # Add goal-achievement reward
+            if self.use_high_level:
+                goal_achievements = self.compute_goal_achievement(states, goals, state)
+                returns += goal_achievements * self.goal_achievement_scale
+
+            # Update distributions using top candidates
+            action_mean, action_std_dev, goal_mean, goal_std_dev = self._update_distributions(
+                actions, goals, returns
+            )
+
+            # Decay the goal standard deviation
+            goal_std_dev = torch.clamp(goal_std_dev * self.goal_std_decay, min=self.min_goal_std)
 
         return action_mean[0].squeeze(dim=0)
 
     def perform_rollout(self, current_state, actions):
         T = self.plan_horizon + 1
         states = [torch.empty(0)] * T
-        delta_means = [torch.empty(0)] * T
-        delta_vars = [torch.empty(0)] * T
+        delta_means = [torch.empty(0)] * (T - 1)
+        delta_vars = [torch.empty(0)] * (T - 1)
 
         current_state = current_state.unsqueeze(dim=0).unsqueeze(dim=0)
         current_state = current_state.repeat(self.ensemble_size, self.n_candidates, 1)
@@ -632,38 +741,84 @@ class Planner(nn.Module):
         for t in range(self.plan_horizon):
             delta_mean, delta_var = self.ensemble(states[t], actions[t])
             if self.use_mean:
-                """
-                Deterministic Update
-                Pros: Computationally efficient. Provides a single expected trajectory, simplifying analysis.
-                Cons: Ignores model uncertainty and stochasticity in the environment, May lead to overconfident predictions and suboptimal exploration.
-                """
-                states[t + 1] = states[t] + delta_mean
+                next_state = states[t] + delta_mean
             else:
-                """
-                Stochastic Update
-                Pros: Incorporates model uncertainty by considering variance. Leads to a distribution over possible future states, enhancing exploration.
-                Cons: Computationally more intensive due to sampling., Introduces randomness, which might make optimization noisier.
-                """
-                states[t + 1] = states[t] + self.ensemble.sample(delta_mean, delta_var)
-            delta_means[t + 1] = delta_mean
-            delta_vars[t + 1] = delta_var
+                next_state = states[t] + self.ensemble.sample(delta_mean, delta_var)
+            states[t + 1] = next_state
+            delta_means[t] = delta_mean
+            delta_vars[t] = delta_var
 
-        states = torch.stack(states[1:], dim=0)
-        delta_vars = torch.stack(delta_vars[1:], dim=0)
-        delta_means = torch.stack(delta_means[1:], dim=0)
+        # Stack the lists into tensors
+        states = torch.stack(states[1:], dim=0)  # Exclude initial state
+        delta_vars = torch.stack(delta_vars, dim=0)
+        delta_means = torch.stack(delta_means, dim=0)
+
         return states, delta_vars, delta_means
 
-    def _fit_gaussian(self, actions, returns):
+    def compute_goal_achievement(self, states, goals, current_state):
+        goal_achievements = torch.zeros(self.n_candidates).float().to(self.device)
+        c = self.context_length
+        num_subgoals = goals.size(0)
+
+        for i in range(num_subgoals):
+            t = i * c + c - 1  # Last timestep in the context
+            if t >= self.plan_horizon:
+                t = self.plan_horizon - 1  # Ensure t is within bounds
+            predicted_state = states[t]  # (ensemble_size, n_candidates, state_size)
+            predicted_state = predicted_state.mean(dim=0)  # (n_candidates, state_size)
+            desired_state = goals[i, :, :]  # (n_candidates, goal_size)
+            
+            # Distance between predicted state and subgoal
+            diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
+            distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
+            
+            # Distance between subgoal and global goal state
+            diff_global_goal = self.global_goal_state.unsqueeze(0) - desired_state  # (n_candidates, state_size)
+            distance_global_goal = torch.norm(diff_global_goal, dim=1)  # (n_candidates,)
+            
+            # Distance between current state and subgoal to ensure feasibility
+            current_state_repeated = current_state.unsqueeze(0).repeat(self.n_candidates, 1)
+            diff_feasibility = desired_state - current_state_repeated  # (n_candidates, state_size)
+            distance_feasibility = torch.norm(diff_feasibility, dim=1)  # (n_candidates,)
+            
+            # Penalize subgoals that are too far from the current state
+            feasibility_penalty = torch.where(
+                distance_feasibility > self.max_subgoal_distance,
+                -float('inf') * torch.ones_like(distance_feasibility),
+                torch.zeros_like(distance_feasibility)
+            )
+            
+            # Compute goal achievement reward
+            goal_reward = -distance_subgoal ** 2 - self.global_goal_weight * distance_global_goal ** 2 + feasibility_penalty
+            goal_achievements += goal_reward
+
+        return goal_achievements
+
+    def _update_distributions(self, actions, goals, returns):
         returns = torch.where(torch.isnan(returns), torch.zeros_like(returns), returns)
         _, topk = returns.topk(self.top_candidates, dim=0, largest=True, sorted=False)
+
+        # Update action distribution
         best_actions = actions[:, topk.view(-1)].reshape(
             self.plan_horizon, self.top_candidates, self.action_size
         )
-        action_mean, action_std_dev = (
-            best_actions.mean(dim=1, keepdim=True),
-            best_actions.std(dim=1, unbiased=False, keepdim=True),
+        action_mean = best_actions.mean(dim=1, keepdim=True)
+        action_std_dev = best_actions.std(dim=1, unbiased=False, keepdim=True)
+
+        # Update goal distribution
+        best_goals = goals[:, topk.view(-1)].reshape(
+            goals.size(0), self.top_candidates, -1
         )
-        return action_mean, action_std_dev
+        goal_mean_new = best_goals.mean(dim=1, keepdim=True)
+        goal_std_dev_new = best_goals.std(dim=1, unbiased=False, keepdim=True)
+
+        # Blend the new goal mean with the global goal state
+        goal_mean = self.goal_mean_weight * self.global_goal_state.unsqueeze(0).unsqueeze(1) + \
+                    (1 - self.goal_mean_weight) * goal_mean_new
+
+        goal_std_dev = goal_std_dev_new
+
+        return action_mean, action_std_dev, goal_mean, goal_std_dev
 
     def return_stats(self):
         if self.use_reward:
@@ -687,7 +842,6 @@ class Planner(nn.Module):
             "mean": tensor.mean().item(),
             "std": tensor.std().item(),
         }
-
 
 # End file: pmbrl/control/planner.py
 
@@ -884,15 +1038,11 @@ class InformationGain(object):
 
 ==============================
 # Begin file: pmbrl/control/agent.py
-# pylint: disable=not-callable
-# pylint: disable=no-member
-
 from copy import deepcopy
 
 import numpy as np
 import torch
 import torch.nn as nn
-
 
 class Agent(object):
     def __init__(self, env, planner, logger=None):
@@ -907,13 +1057,14 @@ class Agent(object):
             while not done:
                 action = self.env.sample_action()
                 next_state, reward, done, _ = self.env.step(action)
-                buffer.add(state, action, reward, next_state)
+                goal = np.zeros(buffer.goal_size)  # Use zero goals for seed episodes
+                buffer.add(state, action, reward, next_state, goal)
                 state = deepcopy(next_state)
                 if done:
                     break
         return buffer
 
-    def run_episode(self, buffer=None, action_noise=None, recorder=None):
+    def run_episode(self, buffer=None, action_noise=None, recorder=None, goal_state=None):
         total_reward = 0
         total_steps = 0
         done = False
@@ -936,7 +1087,12 @@ class Agent(object):
                     )
 
                 if buffer is not None:
-                    buffer.add(state, action, reward, next_state)
+                    # Retrieve the current goal from the planner
+                    if hasattr(self.planner, 'current_goal'):
+                        goal = self.planner.current_goal.cpu().numpy()
+                    else:
+                        goal = np.zeros(buffer.goal_size)
+                    buffer.add(state, action, reward, next_state, goal)
                 if recorder is not None:
                     recorder.capture_frame()
 
@@ -975,11 +1131,13 @@ import numpy as np
 import torch
 from gym.wrappers.monitoring.video_recorder import VideoRecorder
 
+# from pmbrl.models.models import GoalModel
+
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from pmbrl.envs import GymEnv
 from pmbrl.training import Normalizer, Buffer, Trainer
-from pmbrl.models import EnsembleModel, RewardModel
+from pmbrl.models import EnsembleModel, RewardModel, GoalModel
 from pmbrl.control import Planner, Agent
 from pmbrl.utils import Logger
 from pmbrl import get_config
@@ -1006,9 +1164,10 @@ def main(args):
     )
     action_size = env.action_space.shape[0]
     state_size = env.observation_space.shape[0]
+    goal_size = state_size  # Set goal size to state size
 
     normalizer = Normalizer()
-    buffer = Buffer(state_size, action_size, args.ensemble_size, normalizer, device=DEVICE)
+    buffer = Buffer(state_size, action_size, goal_size, args.ensemble_size, normalizer, device=DEVICE)
 
     ensemble = EnsembleModel(
         state_size + action_size,
@@ -1019,9 +1178,12 @@ def main(args):
         device=DEVICE,
     )
     reward_model = RewardModel(state_size + action_size, args.hidden_size, device=DEVICE)
+    goal_model = GoalModel(state_size, state_size, args.hidden_size, device=DEVICE)  # Initialize GoalModel
+    
     trainer = Trainer(
         ensemble,
         reward_model,
+        goal_model,
         buffer,
         n_train_epochs=args.n_train_epochs,
         batch_size=args.batch_size,
@@ -1031,6 +1193,7 @@ def main(args):
         logger=logger,
     )
 
+    # In scripts/train.py
     planner = Planner(
         ensemble,
         reward_model,
@@ -1046,14 +1209,29 @@ def main(args):
         expl_scale=args.expl_scale,
         reward_scale=args.reward_scale,
         strategy=args.strategy,
+        use_high_level=True,
+        context_length=args.context_length,
+        goal_achievement_scale=args.goal_achievement_scale,
+        global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
         device=DEVICE,
+        # New parameters
+        global_goal_weight=args.global_goal_weight,
+        max_subgoal_distance=args.max_subgoal_distance,
+        initial_goal_std=args.initial_goal_std,
+        goal_std_decay=args.goal_std_decay,
+        min_goal_std=args.min_goal_std,
+        goal_mean_weight=args.goal_mean_weight,
     )
+
     agent = Agent(env, planner, logger=logger)
 
     agent.get_seed_episodes(buffer, args.n_seed_episodes)
     msg = "\nCollected seeds: [{} episodes | {} frames]"
     logger.log(msg.format(args.n_seed_episodes, buffer.total_steps))
 
+    # Define the real goal state of the environment
+    goal_state = env.max_reward_state 
+    
     for episode in range(1, args.n_episodes):
         logger.log("\n=== Episode {} ===".format(episode))
         start_time = time.time()
@@ -1061,7 +1239,8 @@ def main(args):
         msg = "Training on [{}/{}] data points"
         logger.log(msg.format(buffer.total_steps, buffer.total_steps * args.action_repeat))
         trainer.reset_models()
-        ensemble_loss, reward_loss = trainer.train()
+        ensemble_loss, reward_loss, goal_loss = trainer.train()
+        #TODO: Add goal_loss to the logger
         logger.log_losses(ensemble_loss, reward_loss)
 
         recorder = None
@@ -1072,8 +1251,8 @@ def main(args):
 
         logger.log("\n=== Collecting data [{}] ===".format(episode))
         reward, steps, stats = agent.run_episode(
-            buffer, action_noise=args.action_noise, recorder=recorder
-        )
+                buffer, action_noise=args.action_noise, recorder=recorder, goal_state=goal_state
+            )
         logger.log_episode(reward, steps)
         logger.log_stats(stats)
 
@@ -1091,6 +1270,14 @@ if __name__ == "__main__":
     parser.add_argument("--config_name", type=str, default="mountain_car")
     parser.add_argument("--strategy", type=str, default="information")
     parser.add_argument("--seed", type=int, default=0)
+    # In scripts/train.py
+    parser.add_argument("--global_goal_weight", type=float, default=1.0)
+    parser.add_argument("--max_subgoal_distance", type=float, default=1.0)
+    parser.add_argument("--initial_goal_std", type=float, default=1.0)
+    parser.add_argument("--goal_std_decay", type=float, default=0.99)
+    parser.add_argument("--min_goal_std", type=float, default=0.1)
+    parser.add_argument("--goal_mean_weight", type=float, default=0.5)
+
     args = parser.parse_args()
     config = get_config(args)
     main(config)
@@ -1098,38 +1285,3 @@ if __name__ == "__main__":
 # End file: scripts/train.py
 
 ==============================
-I would like to to extend this active inference agent that operates in OpenAI Gym and DeepMind enviornemnts
-to use a hierarchical framework. In this extension, we a have a high-level planner model that generates goals.
-It can be modeled as a gaussian distribution over the state space. The posterior of the goal model will be compsoed for prior which 
-is another guassian centered at the goal state of the enviroment with unit-variance. And the likeihood will be computed through interactions with the environment.
-Some ideas for this likelihood is that we want to promote archieving the max reward state (from the current state) in as few steps as possible.
-This likely means that this goals posterior function should also be condititoned on current state. I am not sure exactly how to formulate this yet.
-But in any case, our buffer will now incude goals. There should be as many goals in the buffer as there are states. 
-Each goal sampled from the goal model will be valid for c time steps where c is the context-length. c(T) should be a function of plan horizon T.
-c should divide T evenly. We can define as c(T) = int(T / n) where n is the number of goals in the buffer and is a hyperparameter.
-Once we sample a goal, this goal is interpreated as the desired goal state for the current context. The agent will then plan to reach this goal in the next c time steps.
-However, since we want the buffer to have a goal for every state, we will huse a goal transition function to deterministically compute the all missing intra-context goals.
-Our higher-level policy produces goals gt indicating desired relative changes in state observations.
-That is, at step t, the higher-level policy produces a goal gt, indicating its desire for the lower-level
-agent to take actions that yield it an observation st+c that is close to st + gt. Although some state
-dimensions are more natural as goal subspaces, we chose this more generic goal representation to make it broadly applicable, without any manual
-design of goal spaces, primitives, or controllable dimensions. This makes our method general and easy to apply to new problem settings. 
-To maintain the same absolute position of the goal regardless of state change, the goal transition model h is deﬁned as
-h(st, gt, st+1) = st + gt − st+1. We deﬁne the intrinsic reward as a parameterized reward function based on the distance between the
-current observation and the goal observation: r(st, gt, at, st+1) = −||st + gt − st+1||2. 
-This rewards the lower-level policy for taking actions that yield observations that are close to
-the desired value st + gt.
-
-Now that we have a high-level planner that generates goals, we can use the low-level planner to generate actions that will help us reach these goals.
-Currently, our low level-planner is comprised of an ensemble state transition modelthat predicts the next state given the current state and action, a reward model that predicts the reward of a state so we can add 
-an exploration bonus, and an action selection model that selects the best action.
-While selecting actions in the forward function of Planner, we should implement the TODO of creating a if self.use_high_level: block that will add a goal-achievment reward to the returns for each candidate action sequence.
-
-This way achieving closeness to the goal state will be rewarded as part of the selection the top-k best action sequences, and the selected action sequences will promote achieving the desired goal.
-
-
-Please make the necessary changes to the code to implement this hierarchical active inference agent. Including all other code sections that require modifications but I have not mentioned here.
-To ensure that the code successfully builds on top of the existing code, please make sure that our changes are minimal only the strict necessary to implement the hierarchical active inference agent.
-Please use your best judgement as a PHD-level researcher and data scientist to make the necessary modifications of the code and ensure that the implementation is correct and yields the desired results.
-keep the code modular. For ease of maintenance and extension in the future. For example the goal model should be a separate class that can be easily swapped out for another model. The goal transition 
-function should also be easily swappable as well as the definition of the goal-achievement bonus.

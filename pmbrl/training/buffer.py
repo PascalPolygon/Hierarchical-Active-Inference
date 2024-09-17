@@ -6,7 +6,6 @@ class Buffer(object):
         self,
         state_size,
         action_size,
-        goal_size,  # Added goal_size
         ensemble_size,
         normalizer,
         signal_noise=None,
@@ -15,7 +14,6 @@ class Buffer(object):
     ):
         self.state_size = state_size
         self.action_size = action_size
-        self.goal_size = goal_size  # Store goal size
         self.ensemble_size = ensemble_size
         self.buffer_size = buffer_size
         self.signal_noise = signal_noise
@@ -25,12 +23,11 @@ class Buffer(object):
         self.actions = np.zeros((buffer_size, action_size))
         self.rewards = np.zeros((buffer_size, 1))
         self.state_deltas = np.zeros((buffer_size, state_size))
-        self.goals = np.zeros((buffer_size, goal_size))  # Initialize goals array
 
         self.normalizer = normalizer
         self._total_steps = 0
 
-    def add(self, state, action, reward, next_state, goal_state):
+    def add(self, state, action, reward, next_state):
         idx = self._total_steps % self.buffer_size
         state_delta = next_state - state
 
@@ -38,11 +35,9 @@ class Buffer(object):
         self.actions[idx] = action
         self.rewards[idx] = reward
         self.state_deltas[idx] = state_delta
-        self.goals[idx] = goal_state - state  # Store desired goal as s_goal - s_t
         self._total_steps += 1
 
         self.normalizer.update(state, action, state_delta)
-
 
     def get_train_batches(self, batch_size):
         size = len(self)
@@ -57,7 +52,7 @@ class Buffer(object):
             if (j - i) < batch_size and i != 0:
                 return
 
-            batch_size = j - i
+            batch_size_i = j - i
 
             batch_indices = indices[i:j]
             batch_indices = batch_indices.flatten()
@@ -66,28 +61,23 @@ class Buffer(object):
             actions = self.actions[batch_indices]
             rewards = self.rewards[batch_indices]
             state_deltas = self.state_deltas[batch_indices]
-            goals = self.goals[batch_indices]  # Retrieve goals
 
             states = torch.from_numpy(states).float().to(self.device)
             actions = torch.from_numpy(actions).float().to(self.device)
             rewards = torch.from_numpy(rewards).float().to(self.device)
             state_deltas = torch.from_numpy(state_deltas).float().to(self.device)
-            goals = torch.from_numpy(goals).float().to(self.device)  # Convert goals to tensor
 
             if self.signal_noise is not None:
                 states = states + self.signal_noise * torch.randn_like(states)
 
-            states = states.reshape(self.ensemble_size, batch_size, self.state_size)
-            actions = actions.reshape(self.ensemble_size, batch_size, self.action_size)
-            rewards = rewards.reshape(self.ensemble_size, batch_size, 1)
+            states = states.reshape(self.ensemble_size, batch_size_i, self.state_size)
+            actions = actions.reshape(self.ensemble_size, batch_size_i, self.action_size)
+            rewards = rewards.reshape(self.ensemble_size, batch_size_i, 1)
             state_deltas = state_deltas.reshape(
-                self.ensemble_size, batch_size, self.state_size
+                self.ensemble_size, batch_size_i, self.state_size
             )
-            goals = goals.reshape(
-                self.ensemble_size, batch_size, self.goal_size
-            )  # Reshape goals
 
-            yield states, actions, rewards, state_deltas, goals  # Include goals
+            yield states, actions, rewards, state_deltas
 
     def __len__(self):
         return min(self._total_steps, self.buffer_size)
