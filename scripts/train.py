@@ -66,6 +66,36 @@ def main(args):
     # Define the global goal state (maximum reward state)
     global_goal_state = env.max_reward_state  # Ensure your environment has this method
 
+    # planner = Planner(
+    #     ensemble,
+    #     reward_model,
+    #     action_size,
+    #     args.ensemble_size,
+    #     plan_horizon=args.plan_horizon,
+    #     optimisation_iters=args.optimisation_iters,
+    #     n_candidates=args.n_candidates,
+    #     top_candidates=args.top_candidates,
+    #     use_reward=args.use_reward,
+    #     use_exploration=args.use_exploration,
+    #     use_mean=args.use_mean,
+    #     expl_scale=args.expl_scale,
+    #     reward_scale=args.reward_scale,
+    #     strategy=args.strategy,
+    #     use_high_level=True,
+    #     context_length=args.context_length,
+    #     goal_achievement_scale=args.goal_achievement_scale,
+    #     global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
+    #     device=DEVICE,
+    #     # New parameters
+    #     global_goal_weight=args.global_goal_weight,
+    #     max_subgoal_distance=args.max_subgoal_distance,
+    #     initial_goal_std=args.initial_goal_std,
+    #     goal_std_decay=args.goal_std_decay,
+    #     min_goal_std=args.min_goal_std,
+    #     goal_mean_weight=args.goal_mean_weight,
+    # )
+    
+    
     planner = Planner(
         ensemble,
         reward_model,
@@ -93,6 +123,10 @@ def main(args):
         goal_std_decay=args.goal_std_decay,
         min_goal_std=args.min_goal_std,
         goal_mean_weight=args.goal_mean_weight,
+        # Additional parameters
+        subgoal_scale=1.0,
+        global_goal_scale=1.0,
+        logger=logger,  # Pass the logger here
     )
 
     agent = Agent(env, planner, logger=logger)
@@ -136,12 +170,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     # In scripts/train.py
     parser.add_argument("--global_goal_weight", type=float, default=1.0)
-    parser.add_argument("--max_subgoal_distance", type=float, default=1.0)
+    parser.add_argument("--max_subgoal_distance", type=float, default=10.0)
     parser.add_argument("--initial_goal_std", type=float, default=1.0)
     parser.add_argument("--goal_std_decay", type=float, default=0.99)
     parser.add_argument("--min_goal_std", type=float, default=0.1)
     parser.add_argument("--goal_mean_weight", type=float, default=0.5)
-    parser.add_argument("--goal_achievement_scale", type=float, default=0.1)
+    parser.add_argument("--goal_achievement_scale", type=float, default=1.0)
 
     args = parser.parse_args()
     config = get_config(args)

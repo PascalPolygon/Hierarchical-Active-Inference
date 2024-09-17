@@ -1,7 +1,6 @@
 # pylint: disable=not-callable
 # pylint: disable=no-member
 
-# Begin file: pmbrl/training/trainer.py
 import torch
 
 class Trainer(object):
@@ -87,6 +86,5 @@ class Trainer(object):
     def _get_avg_loss(self, losses, n_batches, epoch):
         epoch_loss = [sum(loss) / n_batch for loss, n_batch in zip(losses, n_batches)]
         return sum(epoch_loss) / epoch
-
 
 

@@ -1,3 +1,4 @@
+# Begin file: pmbrl/control/planner.py
 import torch
 import torch.nn as nn
 
@@ -32,6 +33,10 @@ class Planner(nn.Module):
         goal_std_decay=0.99,
         min_goal_std=0.1,
         goal_mean_weight=0.5,
+        # Additional parameters
+        subgoal_scale=1.0,
+        global_goal_scale=1.0,
+        logger=None,  # Logger for debugging
     ):
         super().__init__()
         self.ensemble = ensemble
@@ -64,6 +69,11 @@ class Planner(nn.Module):
         self.min_goal_std = min_goal_std
         self.goal_mean_weight = goal_mean_weight
 
+        # Additional parameters
+        self.subgoal_scale = subgoal_scale
+        self.global_goal_scale = global_goal_scale
+        self.logger = logger  # Pass logger for debugging
+
         if strategy == "information":
             self.measure = InformationGain(self.ensemble, scale=expl_scale)
         elif strategy == "variance":
@@ -78,7 +88,6 @@ class Planner(nn.Module):
         self.to(device)
 
     def forward(self, state):
-
         state = torch.from_numpy(state).float().to(self.device)
         state_size = state.size(0)
 
@@ -114,7 +123,7 @@ class Planner(nn.Module):
                 device=self.device,
             )
 
-            # Perform rollout with sampled actions and subgoals
+            # Perform rollout with sampled actions
             states, delta_vars, delta_means = self.perform_rollout(state, actions)
 
             # Compute returns
@@ -151,7 +160,11 @@ class Planner(nn.Module):
             # Decay the goal standard deviation
             goal_std_dev = torch.clamp(goal_std_dev * self.goal_std_decay, min=self.min_goal_std)
 
-        return action_mean[0].squeeze(dim=0)
+        # Extract the first action and the first subgoal to return
+        selected_action = action_mean[0].squeeze(dim=0)  # Shape: (action_size,)
+        selected_goal = goal_mean[0].squeeze(dim=1)      # Shape: (goal_size,)
+
+        return selected_action, selected_goal
 
     def perform_rollout(self, current_state, actions):
         T = self.plan_horizon + 1
@@ -195,30 +208,39 @@ class Planner(nn.Module):
             predicted_state = states[t]  # (ensemble_size, n_candidates, state_size)
             predicted_state = predicted_state.mean(dim=0)  # (n_candidates, state_size)
             desired_state = goals[i, :, :]  # (n_candidates, goal_size)
-            
+
             # Distance between predicted state and subgoal
             diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
             distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
-            
+
             # Distance between subgoal and global goal state
             diff_global_goal = self.global_goal_state.unsqueeze(0) - desired_state  # (n_candidates, state_size)
             distance_global_goal = torch.norm(diff_global_goal, dim=1)  # (n_candidates,)
-            
+
             # Distance between current state and subgoal to ensure feasibility
             current_state_repeated = current_state.unsqueeze(0).repeat(self.n_candidates, 1)
             diff_feasibility = desired_state - current_state_repeated  # (n_candidates, state_size)
             distance_feasibility = torch.norm(diff_feasibility, dim=1)  # (n_candidates,)
-            
+
             # Penalize subgoals that are too far from the current state
             feasibility_penalty = torch.where(
                 distance_feasibility > self.max_subgoal_distance,
-                -float('inf') * torch.ones_like(distance_feasibility),
+                -1e6 * torch.ones_like(distance_feasibility),  # Use large negative finite value
                 torch.zeros_like(distance_feasibility)
             )
-            
-            # Compute goal achievement reward
-            goal_reward = -distance_subgoal ** 2 - self.global_goal_weight * distance_global_goal ** 2 + feasibility_penalty
+
+            # Compute goal achievement reward with scaling factors
+            goal_reward = -self.subgoal_scale * distance_subgoal ** 2 \
+                          - self.global_goal_scale * distance_global_goal ** 2 \
+                          + feasibility_penalty
             goal_achievements += goal_reward
+
+            # Logging for debugging
+            if self.logger is not None:
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} distances mean: {distance_subgoal.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} global goal distances mean: {distance_global_goal.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} feasibility penalties mean: {feasibility_penalty.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} goal rewards mean: {goal_reward.mean().item():.4f}")
 
         return goal_achievements
 
@@ -241,8 +263,8 @@ class Planner(nn.Module):
         goal_std_dev_new = best_goals.std(dim=1, unbiased=False, keepdim=True)
 
         # Blend the new goal mean with the global goal state
-        goal_mean = self.goal_mean_weight * self.global_goal_state.unsqueeze(0).unsqueeze(1) + \
-                    (1 - self.goal_mean_weight) * goal_mean_new
+        goal_mean = self.goal_mean_weight * goal_mean_new + \
+                    (1 - self.goal_mean_weight) * self.global_goal_state.unsqueeze(0).unsqueeze(1)
 
         goal_std_dev = goal_std_dev_new
 
