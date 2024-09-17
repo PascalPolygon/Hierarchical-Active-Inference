@@ -97,6 +97,7 @@ def main(args):
     
     
     planner = Planner(
+        env,
         ensemble,
         reward_model,
         action_size,
@@ -117,12 +118,12 @@ def main(args):
         global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
         device=DEVICE,
         # New parameters
-        global_goal_weight=args.global_goal_weight,
-        max_subgoal_distance=args.max_subgoal_distance,
-        initial_goal_std=args.initial_goal_std,
-        goal_std_decay=args.goal_std_decay,
-        min_goal_std=args.min_goal_std,
-        goal_mean_weight=args.goal_mean_weight,
+        # global_goal_weight=args.global_goal_weight,
+        # max_subgoal_distance=args.max_subgoal_distance,
+        # initial_goal_std=args.initial_goal_std,
+        # goal_std_decay=args.goal_std_decay,
+        # min_goal_std=args.min_goal_std,
+        # goal_mean_weight=args.goal_mean_weight,
         # Additional parameters
         subgoal_scale=1.0,
         global_goal_scale=1.0,
@@ -170,12 +171,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     # In scripts/train.py
     parser.add_argument("--global_goal_weight", type=float, default=1.0)
-    parser.add_argument("--max_subgoal_distance", type=float, default=10.0)
+    parser.add_argument("--max_subgoal_distance", type=float, default=7.0)
     parser.add_argument("--initial_goal_std", type=float, default=1.0)
     parser.add_argument("--goal_std_decay", type=float, default=0.99)
     parser.add_argument("--min_goal_std", type=float, default=0.1)
-    parser.add_argument("--goal_mean_weight", type=float, default=0.5)
-    parser.add_argument("--goal_achievement_scale", type=float, default=1.0)
+    parser.add_argument("--goal_mean_weight", type=float, default=0.8)
+    parser.add_argument("--goal_achievement_scale", type=float, default=10.0)
 
     args = parser.parse_args()
     config = get_config(args)

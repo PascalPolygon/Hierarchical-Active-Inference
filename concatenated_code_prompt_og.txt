@@ -110,7 +110,6 @@ class Buffer(object):
 # pylint: disable=not-callable
 # pylint: disable=no-member
 
-# Begin file: pmbrl/training/trainer.py
 import torch
 
 class Trainer(object):
@@ -196,7 +195,6 @@ class Trainer(object):
     def _get_avg_loss(self, losses, n_batches, epoch):
         epoch_loss = [sum(loss) / n_batch for loss, n_batch in zip(losses, n_batches)]
         return sum(epoch_loss) / epoch
-
 
 
 
@@ -537,6 +535,7 @@ class RewardModel(nn.Module):
 
 ==============================
 # Begin file: pmbrl/control/planner.py
+# Begin file: pmbrl/control/planner.py
 import torch
 import torch.nn as nn
 
@@ -571,6 +570,10 @@ class Planner(nn.Module):
         goal_std_decay=0.99,
         min_goal_std=0.1,
         goal_mean_weight=0.5,
+        # Additional parameters
+        subgoal_scale=1.0,
+        global_goal_scale=1.0,
+        logger=None,  # Logger for debugging
     ):
         super().__init__()
         self.ensemble = ensemble
@@ -603,6 +606,11 @@ class Planner(nn.Module):
         self.min_goal_std = min_goal_std
         self.goal_mean_weight = goal_mean_weight
 
+        # Additional parameters
+        self.subgoal_scale = subgoal_scale
+        self.global_goal_scale = global_goal_scale
+        self.logger = logger  # Pass logger for debugging
+
         if strategy == "information":
             self.measure = InformationGain(self.ensemble, scale=expl_scale)
         elif strategy == "variance":
@@ -617,7 +625,6 @@ class Planner(nn.Module):
         self.to(device)
 
     def forward(self, state):
-
         state = torch.from_numpy(state).float().to(self.device)
         state_size = state.size(0)
 
@@ -653,7 +660,7 @@ class Planner(nn.Module):
                 device=self.device,
             )
 
-            # Perform rollout with sampled actions and subgoals
+            # Perform rollout with sampled actions
             states, delta_vars, delta_means = self.perform_rollout(state, actions)
 
             # Compute returns
@@ -690,7 +697,11 @@ class Planner(nn.Module):
             # Decay the goal standard deviation
             goal_std_dev = torch.clamp(goal_std_dev * self.goal_std_decay, min=self.min_goal_std)
 
-        return action_mean[0].squeeze(dim=0)
+        # Extract the first action and the first subgoal to return
+        selected_action = action_mean[0].squeeze(dim=0)  # Shape: (action_size,)
+        selected_goal = goal_mean[0].squeeze(dim=1)      # Shape: (goal_size,)
+
+        return selected_action, selected_goal
 
     def perform_rollout(self, current_state, actions):
         T = self.plan_horizon + 1
@@ -734,30 +745,39 @@ class Planner(nn.Module):
             predicted_state = states[t]  # (ensemble_size, n_candidates, state_size)
             predicted_state = predicted_state.mean(dim=0)  # (n_candidates, state_size)
             desired_state = goals[i, :, :]  # (n_candidates, goal_size)
-            
+
             # Distance between predicted state and subgoal
             diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
             distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
-            
+
             # Distance between subgoal and global goal state
             diff_global_goal = self.global_goal_state.unsqueeze(0) - desired_state  # (n_candidates, state_size)
             distance_global_goal = torch.norm(diff_global_goal, dim=1)  # (n_candidates,)
-            
+
             # Distance between current state and subgoal to ensure feasibility
             current_state_repeated = current_state.unsqueeze(0).repeat(self.n_candidates, 1)
             diff_feasibility = desired_state - current_state_repeated  # (n_candidates, state_size)
             distance_feasibility = torch.norm(diff_feasibility, dim=1)  # (n_candidates,)
-            
+
             # Penalize subgoals that are too far from the current state
             feasibility_penalty = torch.where(
                 distance_feasibility > self.max_subgoal_distance,
-                -float('inf') * torch.ones_like(distance_feasibility),
+                -1e6 * torch.ones_like(distance_feasibility),  # Use large negative finite value
                 torch.zeros_like(distance_feasibility)
             )
-            
-            # Compute goal achievement reward
-            goal_reward = -distance_subgoal ** 2 - self.global_goal_weight * distance_global_goal ** 2 + feasibility_penalty
+
+            # Compute goal achievement reward with scaling factors
+            goal_reward = -self.subgoal_scale * distance_subgoal ** 2 \
+                          - self.global_goal_scale * distance_global_goal ** 2 \
+                          + feasibility_penalty
             goal_achievements += goal_reward
+
+            # Logging for debugging
+            if self.logger is not None:
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} distances mean: {distance_subgoal.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} global goal distances mean: {distance_global_goal.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} feasibility penalties mean: {feasibility_penalty.mean().item():.4f}")
+                self.logger.log(f"Subgoal {i+1}/{num_subgoals} goal rewards mean: {goal_reward.mean().item():.4f}")
 
         return goal_achievements
 
@@ -780,8 +800,8 @@ class Planner(nn.Module):
         goal_std_dev_new = best_goals.std(dim=1, unbiased=False, keepdim=True)
 
         # Blend the new goal mean with the global goal state
-        goal_mean = self.goal_mean_weight * self.global_goal_state.unsqueeze(0).unsqueeze(1) + \
-                    (1 - self.goal_mean_weight) * goal_mean_new
+        goal_mean = self.goal_mean_weight * goal_mean_new + \
+                    (1 - self.goal_mean_weight) * self.global_goal_state.unsqueeze(0).unsqueeze(1)
 
         goal_std_dev = goal_std_dev_new
 
@@ -1007,15 +1027,18 @@ class InformationGain(object):
 # Begin file: pmbrl/control/agent.py
 # Begin file: pmbrl/control/agent.py
 from copy import deepcopy
+import os
 
 import numpy as np
 import torch
+from PIL import Image, ImageDraw
 
 class Agent(object):
     def __init__(self, env, planner, logger=None):
         self.env = env
         self.planner = planner
         self.logger = logger
+        self.current_goal = None  # Initialize current_goal
 
     def get_seed_episodes(self, buffer, n_episodes):
         for _ in range(n_episodes):
@@ -1034,11 +1057,20 @@ class Agent(object):
         total_reward = 0
         total_steps = 0
         done = False
+        step = 0  # Initialize step variable
+
+        # Prepare folder for saving frames
+        if recorder is not None:
+            folder_name = os.path.splitext(recorder.path)[0]  # Remove extension from video path
+            os.makedirs(folder_name, exist_ok=True)  # Create folder with the same name as the video file
 
         with torch.no_grad():
             state = self.env.reset()
+            self.current_goal = self.planner.global_goal_state.cpu().numpy() # Initialize current_goal
             while not done:
-                action = self.planner(state)
+                action, current_goal = self.planner(state)  # Receive both action and current_goal
+                self.current_goal = current_goal.cpu().numpy()  # Update current_goal
+
                 if action_noise is not None:
                     action = self._add_action_noise(action, action_noise)
                 action = action.cpu().detach().numpy()
@@ -1058,6 +1090,10 @@ class Agent(object):
                     recorder.capture_frame()
 
                 state = deepcopy(next_state)
+                
+                self.render_and_save_frame(state, action, folder_name, step)
+                step += 1  # Increment step
+
                 if done:
                     break
 
@@ -1073,6 +1109,68 @@ class Agent(object):
         if noise is not None:
             action = action + noise * torch.randn_like(action)
         return action
+
+    def render_and_save_frame(self, state, action, folder_name, step):
+        """
+        Render the current frame, paint the goal and markers, and save the image.
+
+        Args:
+        state: Current state of the environment
+        folder_name: Directory to save the frames
+        step: Current step number
+        """
+        # Render the frame
+        frame = self.env.unwrapped.render(mode="rgb_array")
+        goal = self.current_goal[0]
+        self.logger.log(f"goal : {goal}")
+
+        if frame is not None:
+            img = Image.fromarray(frame)
+            draw = ImageDraw.Draw(img)
+
+            # Get frame dimensions
+            height, width = frame.shape[:2]
+
+            # Correct calculation for the goal state using cos(theta) and sin(theta)
+            # We assume the goal is represented in the same way as the pendulum's state: [cos(goal_theta), sin(goal_theta)]
+            goal_theta = np.arctan2(goal[1], goal[0])
+
+            # Flip the sign of goal_theta to correct the orientation
+            goal_theta = -goal_theta
+
+            # Calculate goal position in the image
+            goal_x = int(width / 2 + np.sin(goal_theta) * (height / 4))  # Similar logic to the pendulum's x position
+            goal_y = int(height / 2 - np.cos(goal_theta) * (height / 4))  # Similar logic to the pendulum's y position
+
+            # Draw the goal state on the image (green)
+            draw.ellipse([goal_x-5, goal_y-5, goal_x+5, goal_y+5], fill=(0, 255, 0), outline=(0, 255, 0))
+
+            # Draw markers at (0,0) and (1000,1000) (red) - Reference points
+            draw.ellipse([0-5, 0-5, 0+5, 0+5], fill=(255, 0, 0), outline=(255, 0, 0))
+            draw.ellipse([1000-5, 1000-5, 1000+5, 1000+5], fill=(255, 0, 0), outline=(255, 0, 0))
+
+            # Corrected calculation for the pendulum's free end (orange)
+            # For Pendulum-v0, state[0] is cos(theta), state[1] is sin(theta)
+            theta = np.arctan2(state[1], state[0])
+
+            # Flip the sign of theta to correct the orientation
+            theta = -theta
+
+            # Calculate pendulum's free end position, bringing the orange dot closer by reducing the height scaling
+            pendulum_x = int(width / 2 + np.sin(theta) * (height / 4))  # Reduced length factor from height / 3 to height / 4
+            pendulum_y = int(height / 2 - np.cos(theta) * (height / 4))  # Reduced length factor here as well
+
+            # Debugging print statements to check positions
+            # print(f"Step: {step}, Pendulum position: ({pendulum_x}, {pendulum_y}), State: {state}, Action: {action}")
+            # print(f'Goal position: ({goal_x}, {goal_y}), Goal state : {self.current_goal}')
+
+            # Draw the current state (pendulum's free end) (orange)
+            draw.ellipse([pendulum_x-5, pendulum_y-5, pendulum_x+5, pendulum_y+5], fill=(255, 165, 0), outline=(255, 165, 0))
+
+            # Save the modified frame as an image
+            img.save(f"{folder_name}/frame_{step}.png")
+        else:
+            print(f"Warning: Frame {step} could not be rendered.")
 # End file: pmbrl/control/agent.py
 
 # End file: pmbrl/control/agent.py
@@ -1149,6 +1247,36 @@ def main(args):
     # Define the global goal state (maximum reward state)
     global_goal_state = env.max_reward_state  # Ensure your environment has this method
 
+    # planner = Planner(
+    #     ensemble,
+    #     reward_model,
+    #     action_size,
+    #     args.ensemble_size,
+    #     plan_horizon=args.plan_horizon,
+    #     optimisation_iters=args.optimisation_iters,
+    #     n_candidates=args.n_candidates,
+    #     top_candidates=args.top_candidates,
+    #     use_reward=args.use_reward,
+    #     use_exploration=args.use_exploration,
+    #     use_mean=args.use_mean,
+    #     expl_scale=args.expl_scale,
+    #     reward_scale=args.reward_scale,
+    #     strategy=args.strategy,
+    #     use_high_level=True,
+    #     context_length=args.context_length,
+    #     goal_achievement_scale=args.goal_achievement_scale,
+    #     global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
+    #     device=DEVICE,
+    #     # New parameters
+    #     global_goal_weight=args.global_goal_weight,
+    #     max_subgoal_distance=args.max_subgoal_distance,
+    #     initial_goal_std=args.initial_goal_std,
+    #     goal_std_decay=args.goal_std_decay,
+    #     min_goal_std=args.min_goal_std,
+    #     goal_mean_weight=args.goal_mean_weight,
+    # )
+    
+    
     planner = Planner(
         ensemble,
         reward_model,
@@ -1176,6 +1304,10 @@ def main(args):
         goal_std_decay=args.goal_std_decay,
         min_goal_std=args.min_goal_std,
         goal_mean_weight=args.goal_mean_weight,
+        # Additional parameters
+        subgoal_scale=1.0,
+        global_goal_scale=1.0,
+        logger=logger,  # Pass the logger here
     )
 
     agent = Agent(env, planner, logger=logger)
@@ -1219,7 +1351,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     # In scripts/train.py
     parser.add_argument("--global_goal_weight", type=float, default=1.0)
-    parser.add_argument("--max_subgoal_distance", type=float, default=1.0)
+    parser.add_argument("--max_subgoal_distance", type=float, default=10.0)
     parser.add_argument("--initial_goal_std", type=float, default=1.0)
     parser.add_argument("--goal_std_decay", type=float, default=0.99)
     parser.add_argument("--min_goal_std", type=float, default=0.1)

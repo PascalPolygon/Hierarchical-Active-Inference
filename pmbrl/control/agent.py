@@ -30,16 +30,15 @@ class Agent(object):
         total_reward = 0
         total_steps = 0
         done = False
-        step = 0  # Initialize step variable
 
         # Prepare folder for saving frames
         if recorder is not None:
             folder_name = os.path.splitext(recorder.path)[0]  # Remove extension from video path
             os.makedirs(folder_name, exist_ok=True)  # Create folder with the same name as the video file
-
+                
         with torch.no_grad():
             state = self.env.reset()
-            self.current_goal = self.planner.global_goal_state.cpu().numpy() # Initialize current_goal
+            self.current_goal = self.planner.global_goal_state.cpu().numpy()  # Initialize current_goal
             while not done:
                 action, current_goal = self.planner(state)  # Receive both action and current_goal
                 self.current_goal = current_goal.cpu().numpy()  # Update current_goal
@@ -64,8 +63,7 @@ class Agent(object):
 
                 state = deepcopy(next_state)
                 
-                self.render_and_save_frame(state, action, folder_name, step)
-                step += 1  # Increment step
+                self.render_and_save_frame(state, action, folder_name, total_steps)
 
                 if done:
                     break
@@ -94,7 +92,7 @@ class Agent(object):
         """
         # Render the frame
         frame = self.env.unwrapped.render(mode="rgb_array")
-        goal = self.current_goal[0]
+        goal = self.current_goal
         self.logger.log(f"goal : {goal}")
 
         if frame is not None:
