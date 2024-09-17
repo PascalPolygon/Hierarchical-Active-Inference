@@ -35,12 +35,12 @@ def get_config(args):
     config.set_strategy(args.strategy)
     
     # Set new parameters from args
-    config.global_goal_weight = args.global_goal_weight
-    config.max_subgoal_distance = args.max_subgoal_distance
-    config.initial_goal_std = args.initial_goal_std
-    config.goal_std_decay = args.goal_std_decay
-    config.min_goal_std = args.min_goal_std
-    config.goal_mean_weight = args.goal_mean_weight
+    # config.global_goal_weight = args.global_goal_weight
+    # config.max_subgoal_distance = args.max_subgoal_distance
+    # config.initial_goal_std = args.initial_goal_std
+    # config.goal_std_decay = args.goal_std_decay
+    # config.min_goal_std = args.min_goal_std
+    # config.goal_mean_weight = args.goal_mean_weight
     config.goal_achievement_scale = args.goal_achievement_scale
 
     return config
@@ -115,11 +115,13 @@ class DebugConfig(Config):
         super().__init__()
         self.env_name = "Pendulum-v0"
         self.n_episodes = 5
+        # self.expl_scale = 1.0
+        # self.reward_scale = 10.0
         self.n_train_epochs = 1000
         self.max_episode_len = 200
         self.hidden_size = 64
         self.plan_horizon = 5
-        self.context_length = 2
+        self.context_length = 10
         self.record_every = 0  # Record every episode for debugging
 
         # Overriding new parameters for debugging

@@ -58,8 +58,11 @@ class Agent(object):
 
                 if buffer is not None:
                     buffer.add(state, action, reward, next_state)
-                if recorder is not None:
-                    recorder.capture_frame()
+                try:
+                    if recorder is not None:
+                        recorder.capture_frame()
+                except AttributeError as e:
+                    self.logger.log(f"AttributeError: {e}")
 
                 state = deepcopy(next_state)
                 

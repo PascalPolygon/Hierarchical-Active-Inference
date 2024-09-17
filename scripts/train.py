@@ -107,8 +107,11 @@ def main(args):
         n_candidates=args.n_candidates,
         top_candidates=args.top_candidates,
         use_reward=args.use_reward,
+        # use_reward=False,
+        # use_exploration=True,
         use_exploration=args.use_exploration,
-        use_mean=args.use_mean,
+        use_mean = args.use_mean,
+        # use_mean=args.use_mean,
         expl_scale=args.expl_scale,
         reward_scale=args.reward_scale,
         strategy=args.strategy,
@@ -170,11 +173,11 @@ if __name__ == "__main__":
     parser.add_argument("--strategy", type=str, default="information")
     parser.add_argument("--seed", type=int, default=0)
     # In scripts/train.py
-    parser.add_argument("--global_goal_weight", type=float, default=1.0)
-    parser.add_argument("--max_subgoal_distance", type=float, default=7.0)
-    parser.add_argument("--initial_goal_std", type=float, default=1.0)
-    parser.add_argument("--goal_std_decay", type=float, default=0.99)
-    parser.add_argument("--min_goal_std", type=float, default=0.1)
+    # parser.add_argument("--global_goal_weight", type=float, default=1.0)
+    # parser.add_argument("--max_subgoal_distance", type=float, default=7.0)
+    # parser.add_argument("--initial_goal_std", type=float, default=1.0)
+    # parser.add_argument("--goal_std_decay", type=float, default=0.99)
+    # parser.add_argument("--min_goal_std", type=float, default=0.1)
     parser.add_argument("--goal_mean_weight", type=float, default=0.8)
     parser.add_argument("--goal_achievement_scale", type=float, default=10.0)
 
