@@ -164,6 +164,7 @@ class Planner(nn.Module):
             if self.use_high_level:
                 goal_achievement = self.compute_goal_achievement(states, current_subgoal)* self.goal_achievement_scale
                 returns += goal_achievement
+                self.trial_goal_achievements.append(goal_achievement)
             # else:
             #     # Add subgoal distance penalty
             #     subgoal_penalty = self.compute_subgoal_distance_penalty(states, current_subgoal)

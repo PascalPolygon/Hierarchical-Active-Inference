@@ -66,34 +66,7 @@ def main(args):
     # Define the global goal state (maximum reward state)
     global_goal_state = env.max_reward_state  # Ensure your environment has this method
 
-    # planner = Planner(
-    #     ensemble,
-    #     reward_model,
-    #     action_size,
-    #     args.ensemble_size,
-    #     plan_horizon=args.plan_horizon,
-    #     optimisation_iters=args.optimisation_iters,
-    #     n_candidates=args.n_candidates,
-    #     top_candidates=args.top_candidates,
-    #     use_reward=args.use_reward,
-    #     use_exploration=args.use_exploration,
-    #     use_mean=args.use_mean,
-    #     expl_scale=args.expl_scale,
-    #     reward_scale=args.reward_scale,
-    #     strategy=args.strategy,
-    #     use_high_level=True,
-    #     context_length=args.context_length,
-    #     goal_achievement_scale=args.goal_achievement_scale,
-    #     global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
-    #     device=DEVICE,
-    #     # New parameters
-    #     global_goal_weight=args.global_goal_weight,
-    #     max_subgoal_distance=args.max_subgoal_distance,
-    #     initial_goal_std=args.initial_goal_std,
-    #     goal_std_decay=args.goal_std_decay,
-    #     min_goal_std=args.min_goal_std,
-    #     goal_mean_weight=args.goal_mean_weight,
-    # )
+
     
     
     planner = Planner(
@@ -106,10 +79,10 @@ def main(args):
         optimisation_iters=args.optimisation_iters,
         n_candidates=args.n_candidates,
         top_candidates=args.top_candidates,
-        use_reward=False,
-        use_exploration=False,
-        # use_reward=args.use_reward,
-        # use_exploration=args.use_exploration,
+        # use_reward=False,
+        # use_exploration=False,
+        use_reward=args.use_reward,
+        use_exploration=args.use_exploration,
         use_mean = args.use_mean,
         # use_mean=args.use_mean,
         expl_scale=args.expl_scale,
@@ -132,6 +105,34 @@ def main(args):
         global_goal_scale=args.global_goal_scale,
         logger=logger,  # Pass the logger here
     )
+    
+    # planner = Planner(
+    #     env,
+    #     ensemble,
+    #     reward_model,
+    #     action_size,
+    #     args.ensemble_size,
+    #     plan_horizon=args.plan_horizon,
+    #     optimisation_iters=args.optimisation_iters,
+    #     n_candidates=args.n_candidates,
+    #     top_candidates=args.top_candidates,
+    #     use_reward=args.use_reward,
+    #     use_exploration=args.use_exploration,
+    #     use_mean=args.use_mean,
+    #     expl_scale=args.expl_scale,
+    #     reward_scale=args.reward_scale,
+    #     strategy=args.strategy,
+    #     use_high_level=True,
+    #     context_length=args.context_length,
+    #     goal_achievement_scale=args.goal_achievement_scale,
+    #     global_goal_state=torch.tensor(global_goal_state, dtype=torch.float32).to(DEVICE),
+    #     device=DEVICE,
+    #     global_goal_scale=args.global_goal_scale,
+    #     logger=logger,  # Pass the logger here
+    #     step_size=args.step_size,      # New parameter
+    #     max_steps=args.max_steps,      # New parameter
+    # )
+
 
     agent = Agent(env, planner, logger=logger)
 
@@ -172,19 +173,17 @@ if __name__ == "__main__":
     parser.add_argument("--config_name", type=str, default="mountain_car")
     parser.add_argument("--strategy", type=str, default="information")
     parser.add_argument("--seed", type=int, default=0)
-    # In scripts/train.py
-    # parser.add_argument("--global_goal_weight", type=float, default=1.0)
-    # parser.add_argument("--max_subgoal_distance", type=float, default=7.0)
-    # parser.add_argument("--initial_goal_std", type=float, default=1.0)
-    # parser.add_argument("--goal_std_decay", type=float, default=0.99)
-    # parser.add_argument("--min_goal_std", type=float, default=0.1)
-    parser.add_argument("--expl_scale", type=float, default=10.0)
-    parser.add_argument("--reward_scale", type=float, default=10.0)
-    parser.add_argument("--use_reward", action="store_true", default=False)
-    parser.add_argument("--use_exploration", action="store_true", default=False)
+
+    parser.add_argument("--expl_scale", type=float, default=1.0)
+    parser.add_argument("--reward_scale", type=float, default=1.0)
+    parser.add_argument("--use_reward", action="store_true", default=True)
+    parser.add_argument("--use_exploration", action="store_true", default=True)
     
     parser.add_argument("--goal_achievement_scale", type=float, default=1.0)
-    parser.add_argument("--global_goal_scale", type=float, default=100.0)
+    parser.add_argument("--global_goal_scale", type=float, default=1.0)
+    # New stepping stone parameters
+    parser.add_argument("--step_size", type=float, default=0.1, help="Step size towards the global goal for subgoals.")
+    parser.add_argument("--max_steps", type=int, default=10, help="Maximum number of intermediate subgoals.")
     
     args = parser.parse_args()
     config = get_config(args)

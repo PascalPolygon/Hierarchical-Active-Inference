@@ -49,6 +49,8 @@ def get_config(args):
     # config.goal_mean_weight = args.goal_mean_weight
     config.global_goal_scale = args.global_goal_scale
     # config.subgoal_scale = args.subgoal_scale
+    config.max_steps = args.max_steps
+    config.step_size = args.step_size
 
     return config
 
@@ -103,6 +105,8 @@ class Config(object):
         self.goal_achievement_scale = 0.1
         self.subgoal_scale = 1.0
         self.global_goal_scale = 1.0
+        self.max_steps = 10
+        self.step_size = 0.1 #For goal stepping stone mechanism
         
 
     def set_logdir(self, logdir):
@@ -131,7 +135,7 @@ class DebugConfig(Config):
         self.max_episode_len = 200
         self.hidden_size = 64
         self.plan_horizon = 5
-        self.context_length = 3
+        self.context_length = 7
         self.record_every = 0  # Record every episode for debugging
 
         # self.expl_scale = 1.0
