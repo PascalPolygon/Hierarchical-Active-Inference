@@ -171,27 +171,3 @@ class RewardModel(nn.Module):
         self.fc_2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc_3 = nn.Linear(self.hidden_size, 1)
         self.to(self.device)
-# class GoalModel(nn.Module):
-#     def __init__(self, state_size, goal_size, hidden_size, device='cpu'):
-#         super(GoalModel, self).__init__()
-#         self.state_size = state_size
-#         self.goal_size = goal_size
-#         self.hidden_size = hidden_size
-#         self.device = device
-
-#         self.fc1 = nn.Linear(state_size, hidden_size)
-#         self.fc2 = nn.Linear(hidden_size, hidden_size)
-#         self.fc_out = nn.Linear(hidden_size, goal_size)
-#         self.to(device)
-
-#     def forward(self, state):
-#         h = torch.relu(self.fc1(state))
-#         h = torch.relu(self.fc2(h))
-#         goal = self.fc_out(h)
-#         return goal  # Predicted goal vector
-
-#     def reset_parameters(self):
-#         self.fc1.reset_parameters()
-#         self.fc2.reset_parameters()
-#         self.fc_out.reset_parameters()
-#         self.to(self.device)

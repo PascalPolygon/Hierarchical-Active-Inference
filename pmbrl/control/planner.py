@@ -30,7 +30,7 @@ class Planner(nn.Module):
         goal_achievement_scale=1.0,  # Scale for goal-achievement reward
         global_goal_state=None,  # The known global goal state
         # Additional parameters
-        subgoal_scale=1.0,
+        # subgoal_scale=1.0,
         global_goal_scale=1.0,
         logger=None,  # Logger for debugging
         action_low=None,  # Lower bounds of action space
@@ -45,6 +45,8 @@ class Planner(nn.Module):
         self.reward_model = reward_model
         self.action_size = action_size
         self.ensemble_size = ensemble_size
+        
+        # self.use_goal_achievement = use_goal_achievement 
 
         self.plan_horizon = plan_horizon
         self.optimisation_iters = optimisation_iters
@@ -64,7 +66,7 @@ class Planner(nn.Module):
         self.global_goal_state = global_goal_state.to(device)  # Ensure on correct device
 
         # Additional parameters
-        self.subgoal_scale = subgoal_scale
+        # self.subgoal_scale = subgoal_scale
         self.global_goal_scale = global_goal_scale
         self.logger = logger  # Pass logger for debugging
 
@@ -86,11 +88,18 @@ class Planner(nn.Module):
             self.measure = Random(self.ensemble, scale=expl_scale)
         elif strategy == "none":
             self.use_exploration = False
-
+        
+        # Action sequence bonuses (low-level)
         self.trial_rewards = []
         self.trial_bonuses = []
+        self.trial_goal_achievements = []
+        # Goal bonuses
+        self.trial_goal_rewards = []
+        self.trial_goal_bonuses = []
         
-        self.logger.log(f'subgoal scale: {self.subgoal_scale}')
+        self.logger.log(f'exploration scale: {self.expl_scale}')
+        self.logger.log(f'reward scale: {self.reward_scale}')
+        # self.logger.log(f'subgoal scale: {self.subgoal_scale}')
         self.logger.log(f'global goal scale: {self.global_goal_scale}')
         self.logger.log(f'Goal achievement scale: {self.goal_achievement_scale}')
         self.to(device)
@@ -108,7 +117,10 @@ class Planner(nn.Module):
         goal_size = state_size
 
         # Generate subgoals by simulating future states
-        goal_mean = self.generate_feasible_subgoals(state, num_subgoals)
+        goal_mean = state.unsqueeze(0).repeat(self.ensemble_size, 1, 1)  # Shape: (ensemble_size, 1, state_size)
+        if self.use_high_level:
+            # Generate subgoals by simulating future states
+            goal_mean = self.generate_feasible_subgoals(state, num_subgoals)
 
         # Select the current subgoal (e.g., the first one)
         current_subgoal = goal_mean[0]  # Shape: (state_size,)
@@ -123,7 +135,7 @@ class Planner(nn.Module):
             )
 
             # Clamp actions to respect environment bounds
-            actions = self.clamp_actions(actions)
+            # actions = self.clamp_actions(actions)
 
             # Perform rollouts with sampled actions
             states, delta_vars, delta_means = self.perform_rollout(state, actions)
@@ -149,9 +161,13 @@ class Planner(nn.Module):
                 returns += expl_bonus
                 self.trial_bonuses.append(expl_bonus)
 
-            # Add subgoal distance penalty
-            subgoal_penalty = self.compute_subgoal_distance_penalty(states, current_subgoal)
-            returns += subgoal_penalty
+            if self.use_high_level:
+                goal_achievement = self.compute_goal_achievement(states, current_subgoal)* self.goal_achievement_scale
+                returns += goal_achievement
+            # else:
+            #     # Add subgoal distance penalty
+            #     subgoal_penalty = self.compute_subgoal_distance_penalty(states, current_subgoal)
+            #     returns += subgoal_penalty
 
             # Update action distributions using top candidates
             action_mean, action_std_dev = self._update_action_distribution(
@@ -200,7 +216,7 @@ class Planner(nn.Module):
                 device=self.device,
             )
             # Clamp actions
-            goal_actions = self.clamp_actions(goal_actions)
+            # goal_actions = self.clamp_actions(goal_actions)
 
             # Perform rollouts to get predicted subgoal states
             goal_states, goal_delta_vars, goal_delta_means = self.perform_subgoal_rollout(
@@ -210,24 +226,41 @@ class Planner(nn.Module):
             # Compute returns for subgoal candidates
             goal_returns = torch.zeros(n_subgoal_candidates).float().to(self.device)
 
+            # if self.use_high_level_reward:
+            #     # Compute rewards for subgoal candidates
+            #     _states = goal_states.view(-1, current_state.size(-1))
+            #     _actions = goal_actions.unsqueeze(0).repeat(self.ensemble_size, 1, 1, 1)
+            #     _actions = _actions.view(-1, self.action_size)
+            #     rewards = self.reward_model(_states, _actions)
+            #     rewards = rewards * self.reward_scale
+            #     rewards = rewards.view(
+            #         self.context_length, self.ensemble_size, n_subgoal_candidates
+            #     )
+            #     rewards = rewards.mean(dim=1).sum(dim=0)
+            #     goal_returns += rewards
+            
+            # In generate_feasible_subgoals method
             if self.use_high_level_reward:
                 # Compute rewards for subgoal candidates
                 _states = goal_states.view(-1, current_state.size(-1))
                 _actions = goal_actions.unsqueeze(0).repeat(self.ensemble_size, 1, 1, 1)
                 _actions = _actions.view(-1, self.action_size)
                 rewards = self.reward_model(_states, _actions)
-                # rewards = rewards * self.reward_scale
-                rewards = rewards * 10.0
+                rewards = rewards * self.reward_scale  # Use self.reward_scale
                 rewards = rewards.view(
                     self.context_length, self.ensemble_size, n_subgoal_candidates
                 )
                 rewards = rewards.mean(dim=1).sum(dim=0)
                 goal_returns += rewards
+                self.trial_goal_rewards.append(rewards)  # Collect stats
+
 
             if self.use_high_level_exploration:
                 # Compute exploration bonuses for subgoal candidates
                 expl_bonus = self.measure(goal_delta_means, goal_delta_vars) * self.expl_scale
                 goal_returns += expl_bonus
+                self.trial_goal_bonuses.append(expl_bonus)  # Collect stats
+                
 
             # Include distance to global goal (encourage subgoals closer to global goal)
             final_goal_states = goal_states[-1].mean(dim=0)  # Shape: (n_subgoal_candidates, state_size)
@@ -295,30 +328,30 @@ class Planner(nn.Module):
 
         return states, delta_vars, delta_means
     
-    def compute_subgoal_distance_penalty(self, states, current_subgoal):
-        """
-        Compute a penalty based on the expected distance to the current subgoal at the end of the planning horizon.
+    # def compute_subgoal_distance_penalty(self, states, current_subgoal):
+    #     """
+    #     Compute a penalty based on the expected distance to the current subgoal at the end of the planning horizon.
 
-        Args:
-            states (torch.Tensor): Predicted states from rollouts, shape (plan_horizon, ensemble_size, n_candidates, state_size)
-            current_subgoal (torch.Tensor): The current subgoal, shape (state_size,)
+    #     Args:
+    #         states (torch.Tensor): Predicted states from rollouts, shape (plan_horizon, ensemble_size, n_candidates, state_size)
+    #         current_subgoal (torch.Tensor): The current subgoal, shape (state_size,)
 
-        Returns:
-            torch.Tensor: Subgoal distance penalties for each candidate, shape (n_candidates,)
-        """
-        # Use the last predicted state
-        predicted_state = states[-1]  # Shape: (ensemble_size, n_candidates, state_size)
-        predicted_state = predicted_state.mean(dim=0)  # Mean over ensemble: (n_candidates, state_size)
-        desired_state = current_subgoal.unsqueeze(0).repeat(self.n_candidates, 1)  # (n_candidates, state_size)
+    #     Returns:
+    #         torch.Tensor: Subgoal distance penalties for each candidate, shape (n_candidates,)
+    #     """
+    #     # Use the last predicted state
+    #     predicted_state = states[-1]  # Shape: (ensemble_size, n_candidates, state_size)
+    #     predicted_state = predicted_state.mean(dim=0)  # Mean over ensemble: (n_candidates, state_size)
+    #     desired_state = current_subgoal.unsqueeze(0).repeat(self.n_candidates, 1)  # (n_candidates, state_size)
 
-        # Compute distance between predicted state and current subgoal
-        diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
-        distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
+    #     # Compute distance between predicted state and current subgoal
+    #     diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
+    #     distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
 
-        # Compute subgoal distance penalty (negative reward)
-        subgoal_penalty = -self.subgoal_scale * distance_subgoal
+    #     # Compute subgoal distance penalty (negative reward)
+    #     subgoal_penalty = -self.subgoal_scale * distance_subgoal
 
-        return subgoal_penalty
+    #     return subgoal_penalty
 
 
     def perform_rollout(self, current_state, actions):
@@ -350,49 +383,53 @@ class Planner(nn.Module):
         delta_means = torch.stack(delta_means, dim=0)  # (plan_horizon, ensemble_size, n_candidates, state_size)
 
         return states, delta_vars, delta_means
-
-    def compute_goal_achievement(self, states, goals):
+    
+    def compute_goal_achievement(self, states, current_subgoal):
         """
-        Compute the goal achievement reward based on the distance to subgoals.
+        compute_goal_achievement function to consider only the final state rather than summing over the entire planning horizon. 
+        This is more appropriate for environments where reaching and maintaining a goal state is important.
 
         Args:
-            states (torch.Tensor): Predicted states from rollouts, shape (plan_horizon, ensemble_size, n_candidates, state_size)
-            goals (torch.Tensor): Subgoals to achieve, shape (num_subgoals, state_size)
+            states (_type_): _description_
+            current_subgoal (_type_): _description_
 
         Returns:
-            torch.Tensor: Goal achievement rewards for each candidate, shape (n_candidates,)
+            _type_: _description_
         """
-        goal_achievements = torch.zeros(self.n_candidates).float().to(self.device)
-        c = self.context_length
-        num_subgoals = goals.size(0)
+        predicted_state = states[-1]  # Last predicted state
+        predicted_state = predicted_state.mean(dim=0)  # Mean over ensemble
+        desired_state = current_subgoal.unsqueeze(0).repeat(self.n_candidates, 1)
+        diff_subgoal = desired_state - predicted_state
+        distance_subgoal = torch.norm(diff_subgoal, dim=1)
+        goal_achievement = -distance_subgoal
+        return goal_achievement
 
-        for i in range(num_subgoals):
-            t = i * c + c - 1  # Last timestep in the context
-            if t >= self.plan_horizon:
-                t = self.plan_horizon - 1  # Ensure t is within bounds
-            predicted_state = states[t]  # Shape: (ensemble_size, n_candidates, state_size)
-            predicted_state = predicted_state.mean(dim=0)  # Mean over ensemble: (n_candidates, state_size)
-            desired_state = goals[i].unsqueeze(0).repeat(self.n_candidates, 1)  # (n_candidates, state_size)
 
-            # Distance between predicted state and subgoal
-            diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
-            distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
+    # def compute_goal_achievement(self, states, current_subgoal):
+    #     """
+    #     Compute the goal achievement reward based on the distance to the subgoal at each timestep.
 
-            # Compute goal achievement reward
-            # Higher reward for closer distances
-            goal_reward = -self.subgoal_scale * distance_subgoal
+    #     Args:
+    #         states (torch.Tensor): Predicted states from rollouts, shape (plan_horizon, ensemble_size, n_candidates, state_size)
+    #         current_subgoal (torch.Tensor): The current subgoal, shape (state_size,)
 
-            goal_achievements += goal_reward
+    #     Returns:
+    #         torch.Tensor: Goal achievement rewards for each candidate, shape (n_candidates,)
+    #     """
+    #     goal_achievements = torch.zeros(self.n_candidates).float().to(self.device)
+    #     for t in range(self.plan_horizon):
+    #         predicted_state = states[t]  # (ensemble_size, n_candidates, state_size)
+    #         predicted_state = predicted_state.mean(dim=0)  # (n_candidates, state_size)
+    #         desired_state = current_subgoal.unsqueeze(0).repeat(self.n_candidates, 1)  # (n_candidates, state_size)
+    #         diff_subgoal = desired_state - predicted_state  # (n_candidates, state_size)
+    #         distance_subgoal = torch.norm(diff_subgoal, dim=1)  # (n_candidates,)
 
-            # Logging for debugging
-            # if self.logger is not None:
-            #     subgoal_values = desired_state.mean(dim=0).cpu().numpy()
-            #     self.logger.log(f"Subgoal {i+1}/{num_subgoals} values: {subgoal_values}")
-            #     self.logger.log(f"Subgoal {i+1}/{num_subgoals} distances mean: {distance_subgoal.mean().item():.4f}")
-            #     self.logger.log(f"Subgoal {i+1}/{num_subgoals} goal rewards mean: {goal_reward.mean().item():.4f}")
-            #     self.logger.log("=========================================================================")
+    #         # Compute goal achievement reward
+    #         goal_reward = -distance_subgoal
+    #         goal_achievements += goal_reward  # Accumulate over time steps
 
-        return goal_achievements
+    #     return goal_achievements
+
 
     def _update_action_distribution(self, actions, returns):
         returns = torch.where(torch.isnan(returns), torch.zeros_like(returns), returns)
@@ -430,18 +467,45 @@ class Planner(nn.Module):
 
         return action_mean, action_std_dev
 
+    # def return_stats(self):
+    #     if self.use_reward:
+    #         reward_stats = self._create_stats(self.trial_rewards)
+    #     else:
+    #         reward_stats = {}
+    #     if self.use_exploration:
+    #         info_stats = self._create_stats(self.trial_bonuses)
+    #     else:
+    #         info_stats = {}
+    #     self.trial_rewards = []
+    #     self.trial_bonuses = []
+    #     return reward_stats, info_stats
+    
     def return_stats(self):
+        stats = {}
         if self.use_reward:
             reward_stats = self._create_stats(self.trial_rewards)
-        else:
-            reward_stats = {}
+            stats['reward'] = reward_stats
         if self.use_exploration:
             info_stats = self._create_stats(self.trial_bonuses)
-        else:
-            info_stats = {}
+            stats['exploration'] = info_stats
+        if self.trial_goal_achievements:
+            goal_achievement_stats = self._create_stats(self.trial_goal_achievements)
+            stats['goal_achievement'] = goal_achievement_stats
+        if self.trial_goal_rewards:
+            goal_reward_stats = self._create_stats(self.trial_goal_rewards)
+            stats['goal_reward'] = goal_reward_stats
+        if self.trial_goal_bonuses:
+            goal_exploration_stats = self._create_stats(self.trial_goal_bonuses)
+            stats['goal_exploration'] = goal_exploration_stats
+        # Reset stats
         self.trial_rewards = []
         self.trial_bonuses = []
-        return reward_stats, info_stats
+        self.trial_goal_achievements = []
+        self.trial_goal_rewards = []
+        self.trial_goal_bonuses = []
+        return stats
+
+
 
     def _create_stats(self, arr):
         tensor = torch.stack(arr)

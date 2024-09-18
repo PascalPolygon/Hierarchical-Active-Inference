@@ -34,6 +34,11 @@ def get_config(args):
     config.set_seed(args.seed)
     config.set_strategy(args.strategy)
     
+    config.use_exploration = args.use_exploration
+    config.use_reward = args.use_reward
+    config.expl_scale = args.expl_scale
+    config.reward_scale = args.reward_scale
+    
     # Set new parameters from args
     # config.global_goal_weight = args.global_goal_weight
     # config.max_subgoal_distance = args.max_subgoal_distance
@@ -41,9 +46,9 @@ def get_config(args):
     # config.goal_std_decay = args.goal_std_decay
     # config.min_goal_std = args.min_goal_std
     config.goal_achievement_scale = args.goal_achievement_scale
-    config.goal_mean_weight = args.goal_mean_weight
+    # config.goal_mean_weight = args.goal_mean_weight
     config.global_goal_scale = args.global_goal_scale
-    config.subgoal_scale = args.subgoal_scale
+    # config.subgoal_scale = args.subgoal_scale
 
     return config
 
@@ -129,6 +134,9 @@ class DebugConfig(Config):
         self.context_length = 3
         self.record_every = 0  # Record every episode for debugging
 
+        # self.expl_scale = 1.0
+        # self.reward_scale = 1.0
+        
         # Overriding new parameters for debugging
         self.global_goal_weight = 1.0
         self.max_subgoal_distance = 1.0

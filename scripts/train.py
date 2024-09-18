@@ -106,10 +106,10 @@ def main(args):
         optimisation_iters=args.optimisation_iters,
         n_candidates=args.n_candidates,
         top_candidates=args.top_candidates,
-        use_reward=args.use_reward,
-        # use_reward=False,
-        # use_exploration=True,
-        use_exploration=args.use_exploration,
+        use_reward=False,
+        use_exploration=False,
+        # use_reward=args.use_reward,
+        # use_exploration=args.use_exploration,
         use_mean = args.use_mean,
         # use_mean=args.use_mean,
         expl_scale=args.expl_scale,
@@ -128,7 +128,7 @@ def main(args):
         # min_goal_std=args.min_goal_std,
         # goal_mean_weight=args.goal_mean_weight,
         # Additional parameters
-        subgoal_scale=args.subgoal_scale,
+        # subgoal_scale=args.subgoal_scale,
         global_goal_scale=args.global_goal_scale,
         logger=logger,  # Pass the logger here
     )
@@ -178,12 +178,14 @@ if __name__ == "__main__":
     # parser.add_argument("--initial_goal_std", type=float, default=1.0)
     # parser.add_argument("--goal_std_decay", type=float, default=0.99)
     # parser.add_argument("--min_goal_std", type=float, default=0.1)
-    parser.add_argument("--goal_mean_weight", type=float, default=0.8)
-    parser.add_argument("--goal_achievement_scale", type=float, default=1000.0)
-    parser.add_argument("--subgoal_scale", type=float, default=10.0)
-    parser.add_argument("--global_goal_scale", type=float, default=10.0)
+    parser.add_argument("--expl_scale", type=float, default=10.0)
+    parser.add_argument("--reward_scale", type=float, default=10.0)
+    parser.add_argument("--use_reward", action="store_true", default=False)
+    parser.add_argument("--use_exploration", action="store_true", default=False)
     
-
+    parser.add_argument("--goal_achievement_scale", type=float, default=1.0)
+    parser.add_argument("--global_goal_scale", type=float, default=100.0)
+    
     args = parser.parse_args()
     config = get_config(args)
     main(config)

@@ -65,7 +65,7 @@ def concatenate_files(source_dir, output_file, skip_paths=None):
 if __name__ == "__main__":
     # Configuration
     source_directory = "."  # Path to the source directory
-    output_filename = "concatenated_code_prompt_og.txt"  # Output file path
+    output_filename = "concatenated_code_prompt.txt"  # Output file path
     skip_paths = [
         # Add any files or directories to skip here, relative to the source_directory
         # Example: "pmbrl/envs/envs/assets"
