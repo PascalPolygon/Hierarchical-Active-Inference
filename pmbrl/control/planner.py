@@ -102,6 +102,7 @@ class Planner(nn.Module):
         # self.logger.log(f'subgoal scale: {self.subgoal_scale}')
         self.logger.log(f'global goal scale: {self.global_goal_scale}')
         self.logger.log(f'Goal achievement scale: {self.goal_achievement_scale}')
+        self.logger.log(f'Plan horizon: {self.plan_horizon}')
         self.to(device)
 
     def forward(self, state):
@@ -265,6 +266,7 @@ class Planner(nn.Module):
 
             # Include distance to global goal (encourage subgoals closer to global goal)
             final_goal_states = goal_states[-1].mean(dim=0)  # Shape: (n_subgoal_candidates, state_size)
+                      
             distances_to_global_goal = torch.norm(final_goal_states - self.global_goal_state.unsqueeze(0), dim=1)
             goal_returns -= self.global_goal_scale * distances_to_global_goal
 

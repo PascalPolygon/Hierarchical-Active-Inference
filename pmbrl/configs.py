@@ -49,8 +49,6 @@ def get_config(args):
     # config.goal_mean_weight = args.goal_mean_weight
     config.global_goal_scale = args.global_goal_scale
     # config.subgoal_scale = args.subgoal_scale
-    config.max_steps = args.max_steps
-    config.step_size = args.step_size
 
     return config
 
@@ -93,7 +91,7 @@ class Config(object):
         self.action_noise_scale = 0.1
 
         self.context_length = 7
-        self.n_experiments = 3
+        self.n_trials = 3
 
         # New parameters with default values
         self.global_goal_weight = 1.0
@@ -157,13 +155,20 @@ class MountainCarConfig(Config):
         self.logdir = "mountain_car"
         self.env_name = "SparseMountainCar"
 
+        self.n_train_epochs = 100
+        # self.n_train_epochs = 1000
+        self.plan_horizon = 30
+        self.context_length = 37
         self.max_episode_len = 5
-        self.n_train_epochs = 1
+        # self.max_episode_len = 200
+        # self.n_train_epochs = 100
         self.n_seed_episodes = 1
         self.expl_scale = 1.0
         self.n_episodes = 5
-        self.ensemble_size = 5
-        self.record_every = None
+        # self.ensemble_size = 5
+        self.n_candidates = 500
+        self.top_candidates = 50
+        self.record_every = 0
 
         # Overriding new parameters for Mountain Car
         self.global_goal_weight = 1.0

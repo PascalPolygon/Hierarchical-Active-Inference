@@ -35,6 +35,16 @@ def main(args):
     env = GymEnv(
         args.env_name, args.max_episode_len, action_repeat=args.action_repeat, seed=args.seed
     )
+    
+    # action_space = gym.spaces.Box(
+    #     low=self.min_action, high=self.max_action, shape=(1,), dtype=np.float32
+    # )
+    # observation_space = gym.spaces.Box(
+    #     low=self.low_state, high=self.high_state, dtype=np.float32
+    # )
+        
+    # logger.log(env.action_space)
+    # logger.log(env.unwrapped.action_space)
     action_size = env.action_space.shape[0]
     state_size = env.observation_space.shape[0]
 
@@ -65,9 +75,13 @@ def main(args):
 
     # Define the global goal state (maximum reward state)
     global_goal_state = env.max_reward_state  # Ensure your environment has this method
-
-
     
+    # Get the global goal state
+    global_goal_state = env.max_reward_state
+    if args.env_name in ['HalfCheetahRun', 'HalfCheetahFlip']:
+        global_goal_state = None  # Will be set dynamically in the planner
+    elif args.env_name == 'AntMaze':
+        args.global_goal_scale = 0.0
     
     planner = Planner(
         env,
@@ -176,14 +190,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--expl_scale", type=float, default=1.0)
     parser.add_argument("--reward_scale", type=float, default=1.0)
-    parser.add_argument("--use_reward", action="store_true", default=True)
-    parser.add_argument("--use_exploration", action="store_true", default=True)
+    parser.add_argument("--use_reward", action="store_true", default=False)
+    parser.add_argument("--use_exploration", action="store_true", default=False)
     
     parser.add_argument("--goal_achievement_scale", type=float, default=1.0)
     parser.add_argument("--global_goal_scale", type=float, default=1.0)
     # New stepping stone parameters
-    parser.add_argument("--step_size", type=float, default=0.1, help="Step size towards the global goal for subgoals.")
-    parser.add_argument("--max_steps", type=int, default=10, help="Maximum number of intermediate subgoals.")
+    # parser.add_argument("--step_size", type=float, default=0.1, help="Step size towards the global goal for subgoals.")
+    # parser.add_argument("--max_steps", type=int, default=10, help="Maximum number of intermediate subgoals.")
     
     args = parser.parse_args()
     config = get_config(args)

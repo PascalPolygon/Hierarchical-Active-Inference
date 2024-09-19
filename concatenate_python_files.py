@@ -79,7 +79,7 @@ if __name__ == "__main__":
         "pmbrl/utils",
         "scripts/__init__.py",
 
-        "pmbrl/envs",
+        # "pmbrl/envs",
     ]
 
     # Execute the concatenation

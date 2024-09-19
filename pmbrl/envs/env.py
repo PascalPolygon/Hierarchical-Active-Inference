@@ -64,6 +64,12 @@ class GymEnv(object):
             from pmbrl.envs.envs.mountain_car import SparseMountainCarEnv
 
             return SparseMountainCarEnv()
+        
+            # from gym.wrappers import Monitor
+            # env = gym.make("MountainCar-v0")
+            # env = Monitor(env, './video', force=True)
+            # return env
+
 
         elif env_name == HALF_CHEETAH_RUN:
             from pmbrl.envs.envs.half_cheetah_run import HalfCheetahRunEnv
@@ -94,17 +100,12 @@ class GymEnv(object):
         
     def _get_max_reward_state(self, env_name):
         if env_name == SPARSE_MOUNTAIN_CAR:
-            return np.array([-0.5, 0])
-        elif env_name == HALF_CHEETAH_RUN:
-            return np.array([1, 0, 0])  # Replace with actual max reward state
-        elif env_name == HALF_CHEETAH_FLIP:
-            return np.array([0, 0, 0])  # Replace with actual max reward state
+            return np.array([0.45, 0])
+        elif env_name in [HALF_CHEETAH_RUN, HALF_CHEETAH_FLIP]:
+            # For HalfCheetah, set goal to be ahead of current position
+            return None  # Will be handled dynamically
         elif env_name == ANT_MAZE:
-            return np.array([0, 0])  # Replace with actual max reward state
-        elif env_name == DM_REACHER:
-            return np.array([1, 1])  # Replace with actual max reward state
-        elif env_name == DM_CATCH:
-            return np.array([0, 0])  # Replace with actual max reward state
+            return None  # No specific goal state
         else:
-            # Default max reward state for Pendulum or other unknown environments
-            return np.array([1, 0, 0])
+            # Default max reward state
+            return np.array([1.0, 0.0, 0.0])  # Upright position for Pendulum

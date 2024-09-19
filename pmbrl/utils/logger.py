@@ -15,6 +15,7 @@ class Logger(object):
         os.makedirs(self.path, exist_ok=True)
         os.makedirs(self.video_dir, exist_ok=True)
         self.metrics = {}
+        self.trial_metrics = {}
         self._init_print()
         self._setup_metrics()
 
@@ -66,6 +67,18 @@ class Logger(object):
         self.metrics["steps"].append(steps)
         msg = "Episode Reward: {:.2f} | Steps: {:.2f}"
         self.log(msg.format(reward, steps))
+    
+    def log_trial_episode(self, trial_num, episode, reward, steps, stats, agent_name):
+        if agent_name not in self.trial_metrics:
+            self.trial_metrics[agent_name] = {}
+        if trial_num not in self.trial_metrics[agent_name]:
+            self.trial_metrics[agent_name][trial_num] = []
+        self.trial_metrics[agent_name][trial_num].append({
+            'episode': episode,
+            'reward': reward,
+            'steps': steps,
+            'stats': stats,
+        })
 
     def log_time(self, time_taken):
         """
@@ -129,12 +142,19 @@ class Logger(object):
                     f"{key.capitalize()} Stats:\n {pprint.pformat(formatted_stats)}"
                 )
 
+    # def save(self):
+    #     """
+    #     Saves all logged metrics to a JSON file.
+    #     """
+    #     self._save_json(self.metrics_path, self.metrics)
+    #     self.log("Metrics saved to {}".format(self.metrics_path))
+    
     def save(self):
-        """
-        Saves all logged metrics to a JSON file.
-        """
-        self._save_json(self.metrics_path, self.metrics)
-        self.log("Metrics saved to {}".format(self.metrics_path))
+        # Save metrics to JSON file
+        os.makedirs(self.logdir, exist_ok=True)
+        metrics_path = os.path.join(self.logdir, 'metrics.json')
+        with open(metrics_path, 'w') as f:
+            json.dump(self.trial_metrics, f, indent=4)
 
     def get_video_path(self, episode):
         """
