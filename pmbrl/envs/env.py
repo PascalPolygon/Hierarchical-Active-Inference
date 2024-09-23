@@ -100,7 +100,7 @@ class GymEnv(object):
         
     def _get_max_reward_state(self, env_name):
         if env_name == SPARSE_MOUNTAIN_CAR:
-            return np.array([0.45, 0])
+            return np.array([0.5, 0]) #TODO: Remove velocity term from goal achievement calculation as we only care about position here.
         elif env_name in [HALF_CHEETAH_RUN, HALF_CHEETAH_FLIP]:
             # For HalfCheetah, set goal to be ahead of current position
             return None  # Will be handled dynamically

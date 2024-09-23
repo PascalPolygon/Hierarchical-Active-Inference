@@ -5,6 +5,7 @@ import gym
 import numpy as np
 from gym import spaces
 from gym.utils import seeding
+from PIL import Image, ImageDraw
 
 class SparseMountainCarEnv(gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 30}
@@ -36,6 +37,9 @@ class SparseMountainCarEnv(gym.Env):
 
         self.seed()
         self.reset()
+    
+    def get_env_name(self):
+        return self.__class__.__name__
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -70,6 +74,7 @@ class SparseMountainCarEnv(gym.Env):
 
     def _height(self, xs):
         return np.sin(3 * xs) * 0.45 + 0.55
+
 
     def render(self, mode='human'):
         """Renders the environment.

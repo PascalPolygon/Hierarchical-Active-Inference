@@ -32,6 +32,7 @@ class Agent(object):
         total_steps = 0
         done = False
 
+        folder_name = None
         # Prepare folder for saving frames
         if recorder is not None:
             folder_name = os.path.splitext(recorder.path)[0]  # Remove extension from video path
@@ -39,10 +40,13 @@ class Agent(object):
                 
         with torch.no_grad():
             state = self.env.reset()
-            self.current_goal = self.planner.global_goal_state.cpu().numpy()  # Initialize current_goal
+            # self.current_goal = self.planner.global_goal_state.cpu().numpy()  # Initialize current_goal
+            # self.logger.log(f"Initial goal: {self.current_goal}")
             while not done:
                 action, current_goal = self.planner(state)  # Receive both action and current_goal
                 self.current_goal = current_goal.cpu().numpy()  # Update current_goal
+                self.logger.log(f"Action taken: {action}")
+                self.logger.log(f"Current goal: {self.current_goal}")
 
                 if action_noise is not None:
                     action = self._add_action_noise(action, action_noise)
@@ -61,14 +65,17 @@ class Agent(object):
                     buffer.add(state, action, reward, next_state)
                 try:
                     if recorder is not None:
-                        self.logger.log(f"Recording frame {total_steps}")
                         recorder.capture_frame()
                 except AttributeError as e:
                     self.logger.log(f"AttributeError: {e}")
 
                 state = deepcopy(next_state)
                 
-                # self.render_and_save_frame(state, action, folder_name, total_steps)
+                self.logger.log(f"Saving frame: {total_steps}")
+                
+                if self.current_goal is not None:
+                    #Only for Hierarchical Planner
+                    self.render_and_save_frame(state, action, folder_name, total_steps)
 
                 if done:
                     break
@@ -107,11 +114,21 @@ class Agent(object):
         draw = ImageDraw.Draw(img)
 
         # Get environment name
-        env_name = self.env.unwrapped.spec.id if self.env.unwrapped.spec else 'Unknown'
+        # TODO: Define rendering on the environment class itself
+        if hasattr(self.env.unwrapped, 'get_env_name'):
+            env_name = self.env.unwrapped.get_env_name()
+        elif hasattr(self.env.unwrapped, 'spec') and self.env.unwrapped.spec:
+            env_name = self.env.unwrapped.spec.id
+        else:
+            env_name = 'Unknown'
+        
+        # self.logger.log(f"Rendering frame for {env_name}")
 
         if env_name == 'Pendulum-v0':
             self._render_pendulum(draw, frame, state)
-        elif env_name in ['MountainCarContinuous-v0', 'SparseMountainCar']:
+        elif env_name in ['MountainCarContinuous-v0', 'SparseMountainCarEnv']:
+            # print(f"Rendering MountainCar")
+            # self.logger.log(f"Rendering MountainCar")
             self._render_mountain_car(draw, frame, state)
         elif env_name in ['HalfCheetahRun', 'HalfCheetahFlip']:
             self._render_half_cheetah(draw, frame, state)
@@ -139,6 +156,11 @@ class Agent(object):
 
         # Get frame dimensions
         height, width = frame.shape[:2]
+        
+        # Make sure the goal has the correct shape
+        if goal.shape[0] != 3:
+            #Return (Happens when we are not using the hierarchical planner)
+            return
 
         # Correct calculation for the goal state using cos(theta) and sin(theta)
         goal_theta = np.arctan2(goal[1], goal[0])
@@ -180,6 +202,8 @@ class Agent(object):
         # Get frame dimensions
         height, width = frame.shape[:2]
 
+        # print(f'Frame shape: {frame.shape}')
+        # self.logger.log(f'Frame shape: {frame.shape}')
         # MountainCar state consists of position and velocity
         position = state[0]
         min_position = self.env.unwrapped.min_position
@@ -188,40 +212,22 @@ class Agent(object):
         # Map position to pixel coordinates
         position_norm = (position - min_position) / (max_position - min_position)
         car_x = int(position_norm * width)
-        car_y = int(height * 0.75)  # Approximate y position
+        car_y = int(height * 0.20)  # Approximate y position
 
         # Draw the car position (orange dot)
         draw.ellipse([car_x - 5, car_y - 5, car_x + 5, car_y + 5],
                     fill=(255, 165, 0), outline=(255, 165, 0))
 
         # Goal position
-        goal_position = self.env.unwrapped.goal_position
+        # goal_position = self.env.unwrapped.goal_position
+        goal_position = goal[0]  # Assuming goal is only in x direction
         goal_position_norm = (goal_position - min_position) / (max_position - min_position)
         goal_x = int(goal_position_norm * width)
-        goal_y = int(height * 0.75)
+        goal_y = int(height * 0.20)
 
         # Draw the goal position (green dot)
         draw.ellipse([goal_x - 5, goal_y - 5, goal_x + 5, goal_y + 5],
                     fill=(0, 255, 0), outline=(0, 255, 0))
-
-        # Add red markers at the corners and center for debugging
-        # Top-left corner
-        draw.ellipse([0 - 5, 0 - 5, 0 + 5, 0 + 5],
-                    fill=(255, 0, 0), outline=(255, 0, 0))
-        # Top-right corner
-        draw.ellipse([width - 5, 0 - 5, width + 5, 0 + 5],
-                    fill=(255, 0, 0), outline=(255, 0, 0))
-        # Bottom-left corner
-        draw.ellipse([0 - 5, height - 5, 0 + 5, height + 5],
-                    fill=(255, 0, 0), outline=(255, 0, 0))
-        # Bottom-right corner
-        draw.ellipse([width - 5, height - 5, width + 5, height + 5],
-                    fill=(255, 0, 0), outline=(255, 0, 0))
-        # Center of the frame
-        center_x = width // 2
-        center_y = height // 2
-        draw.ellipse([center_x - 5, center_y - 5, center_x + 5, center_y + 5],
-                    fill=(255, 0, 0), outline=(255, 0, 0))
 
     def _render_half_cheetah(self, draw, frame, state):
         """

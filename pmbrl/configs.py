@@ -34,10 +34,16 @@ def get_config(args):
     config.set_seed(args.seed)
     config.set_strategy(args.strategy)
     
+    config.n_trials = args.n_trials
+    config.n_episodes = args.n_episodes
+        
     config.use_exploration = args.use_exploration
     config.use_reward = args.use_reward
     config.expl_scale = args.expl_scale
     config.reward_scale = args.reward_scale
+    
+    config.context_length = args.context_length
+    config.plan_horizon = args.plan_horizon
     
     # Set new parameters from args
     # config.global_goal_weight = args.global_goal_weight
@@ -91,7 +97,7 @@ class Config(object):
         self.action_noise_scale = 0.1
 
         self.context_length = 7
-        self.n_trials = 3
+        self.n_trials = 25
 
         # New parameters with default values
         self.global_goal_weight = 1.0
@@ -126,10 +132,10 @@ class DebugConfig(Config):
     def __init__(self):
         super().__init__()
         self.env_name = "Pendulum-v0"
-        self.n_episodes = 5
+        self.n_episodes = 25
         # self.expl_scale = 1.0
         # self.reward_scale = 10.0
-        self.n_train_epochs = 1000
+        self.n_train_epochs = 400
         self.max_episode_len = 200
         self.hidden_size = 64
         self.plan_horizon = 5
@@ -155,14 +161,14 @@ class MountainCarConfig(Config):
         self.logdir = "mountain_car"
         self.env_name = "SparseMountainCar"
 
-        self.n_train_epochs = 100
-        # self.n_train_epochs = 1000
-        self.plan_horizon = 30
-        self.context_length = 37
-        self.max_episode_len = 5
+        # self.n_train_epochs = 100
+        self.n_train_epochs = 1000
+        self.plan_horizon = 15
+        self.context_length = 18
+        self.max_episode_len = 200
         # self.max_episode_len = 200
         # self.n_train_epochs = 100
-        self.n_seed_episodes = 1
+        self.n_seed_episodes = 5
         self.expl_scale = 1.0
         self.n_episodes = 5
         # self.ensemble_size = 5

@@ -153,8 +153,9 @@ class Logger(object):
         # Save metrics to JSON file
         os.makedirs(self.logdir, exist_ok=True)
         metrics_path = os.path.join(self.logdir, 'metrics.json')
+        self.log("Metrics saved to {}".format(metrics_path))
         with open(metrics_path, 'w') as f:
-            json.dump(self.trial_metrics, f, indent=4)
+            json.dump(self.metrics, f, indent=4)
 
     def get_video_path(self, episode):
         """
@@ -205,3 +206,8 @@ class Logger(object):
         """
         with open(path, "w") as file:
             json.dump(obj, file, indent=4)
+    
+    def save_metrics(self, all_metrics, trial):
+        metrics_path = os.path.join(self.logdir, f'metrics_trial_{trial}.json')
+        with open(metrics_path, 'w') as f:
+            json.dump(all_metrics, f, indent=4)
